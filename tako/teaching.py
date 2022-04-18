@@ -719,22 +719,25 @@ class ValidationCourseDirector(CourseDirector):
 
         self._training_dataset = training_dataset
         self._validation_dataset = validation_dataset
-        self.learner = learner
-        self._builder = (
+        self._learner = learner
+        self._n_epochs = n_epochs
+        self._batch_size = batch_size
+        self._workshop = (
             TrainerBuilder()
             .validator(validation_dataset, batch_size)
             .teacher(training_dataset, batch_size)
             .n_epochs(n_epochs)
-        )
+        ).build(learner)
+        self._chart = Chart()
+    
+    # TODO: Get the score
     
     def run(self) -> Chart:
-        workshop = self._builder.build(self._learner)
-        chart = Chart()
         
-        status = workshop.advance(chart)
+        status = self._workshop.advance(self._chart)
         while not status.is_finished:
-            status = workshop.advance(chart)
-        return chart
+            status = self._workshop.advance(self._chart)
+        return self._chart
 
 
 class TestingCourseDirector(CourseDirector):
@@ -748,18 +751,18 @@ class TestingCourseDirector(CourseDirector):
         self._training_dataset = training_dataset
         self._testing_dataset = testing_dataset
         self._learner = learner
-        self._builder = (
+        self._n_epochs = n_epochs
+        self._batch_size = batch_size
+        self._workshop = (
             TrainerBuilder()
             .tester(training_dataset, batch_size)
             .teacher(training_dataset, batch_size)
             .n_epochs(n_epochs)
-        )
+        ).build(self._learner)
+        self._chart = Chart()
     
-    def run(self) -> Chart:
-        workshop = self._builder.build(self._learner)
-        chart = Chart()
-        
-        status = workshop.advance(chart)
+    def run(self):
+        status = self._workshop.advance(self._chart)
         while not status.is_finished:
-            status = workshop.advance(chart)
-        return chart
+            status = self._workshop.advance(self._chart)
+        return self._chart
