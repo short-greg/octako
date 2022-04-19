@@ -1,4 +1,6 @@
 from uuid import UUID, uuid1
+
+import pytest
 from .modules import Null
 from . import nodes
 import torch.nn as nn
@@ -6,6 +8,7 @@ import torch as th
 import torch.functional as F
 import torch.nn.functional as FNN
 
+# TODO: Still need to test Info, ID etc
 
 class NoArg(nn.Module):
 
@@ -77,6 +80,22 @@ class TestLayer:
         sequence = nodes.Sequence([nn.Sigmoid(), nn.Tanh()])
         layer = nodes.Layer(sequence)
         assert layer.is_parent
+
+    def test_sub_iterates_sequence(self):
+
+        sequence = nodes.Sequence([nn.Sigmoid(), nn.Tanh()])
+        layer = nodes.Layer(sequence)
+        iter_ =  layer.sub()
+        layer = next(iter_)
+        layer2 = next(iter_)
+        assert isinstance(layer.op, nn.Sigmoid)
+        assert isinstance(layer2.op, nn.Tanh)
+
+    def test_layer_sub_does_not_iterate_non_tako(self):
+
+        layer = nodes.Layer(Null())
+        with pytest.raises(StopIteration):
+            next(layer.sub())
 
     def test_empty_method_outputs_empty(self):
 

@@ -1,12 +1,15 @@
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
 from mailbox import NotEmptyError
+from re import X
 import typing
+from numpy import choose, isin
 import torch as th
 import torch.nn as nn
-from functools import partial, singledispatch
+from functools import partial, singledispatch, singledispatchmethod
 import uuid
 import time
+from .modules import F
 
 
 UNDEFINED = object()
@@ -29,11 +32,28 @@ EMPTY = object()
 # In
 # Layer
 
+
 class ID(object):
 
     def __init__(self, id: uuid.UUID=None):
 
         self.x = id if id is not None else uuid.uuid4()
+
+
+def first(x):
+
+    for x_i in x:
+        if x_i != UNDEFINED:
+            return x_i
+    return UNDEFINED
+
+
+def require(x):
+
+    for x_i in x:
+        if x_i == UNDEFINED:
+            return UNDEFINED
+    return x
 
 
 @dataclass
@@ -48,14 +68,24 @@ def if_true(val, obj):
     if val is True:
         return obj
 
+class Incoming(object):
+
+    def __init__(self, incoming):
+
+        self._is_list = isinstance(incoming, list)
+        self._incoming = incoming
+        self._defined = incoming is None
+
 
 class Node(ABC):
 
     def __init__(
-        self, is_outgoing: bool=False, incoming=None, info: Info=None
+        self, is_outgoing: bool=False, incoming: Incoming=None, info: Info=None
     ):
         self._info = info or Info()
         self.is_outgoing = is_outgoing
+        if not isinstance(incoming, Incoming):
+            incoming = Incoming(incoming)
         self._incoming = incoming
 
     @abstractproperty
@@ -74,6 +104,12 @@ class Node(ABC):
     def x(self, x):
         raise NotImplementedError
     
+    def loop(self, layer):
+        incoming = if_true(self.is_outgoing, self)
+        return Loop(
+            layer, x=self.y, incoming=incoming, is_outgoing=self.is_outgoing
+        )
+
     def to(
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
         info: Info=None
@@ -98,34 +134,49 @@ class Node(ABC):
     def is_parent(self):
         raise NotImplementedError
 
+    def check_id(self, id: ID):
+        if self._info.id is None:
+            return False
+        return self._info.id == id
+
     def sub(self) -> typing.Iterator:
         if self.is_parent:
             for layer in self._module.forward_iter(In(self._x)):
                 yield layer
 
-    def join(self, *others, info: Info=None):
-        outgoing = self.is_outgoing
-        is_undefined = self.y == UNDEFINED
-        other_ys = []
+    def join(self, *others, info: Info=None, join_f=require):
+        is_outgoing = self.is_outgoing
+        ys = [self.y]
         for other in others:
-            outgoing = outgoing or other.is_outgoing
-            is_undefined = is_undefined or other.y == UNDEFINED
-            other_ys.append(other.y)
-        incoming = if_true(outgoing, self)
-
-        # TODO: think about this more
-        # y = UNDEFINED if undefined else other_ys
-        if is_undefined: x = UNDEFINED
-        else: x = [self.y, *other_ys]
+            is_outgoing = is_outgoing or other.is_outgoing
+            ys.append(other.y)
+        
+        # TODO: Finish.. Need to set up incoming correctly.. Multiple incoming
+        if is_outgoing:
+            incoming = [self, *others]
+        else:
+            incoming = None
         
         return Layer(
-            nn_module=Join(len(other_ys) + 1),
-            x=x, 
-            incoming=incoming, is_outgoing=outgoing, info=info
+            nn_module=F(join_f),
+            x=ys, 
+            incoming=incoming, is_outgoing=is_outgoing, info=info
         )
 
-    def route(self):
-        pass
+    def route(self, cond_node):
+
+        if self.is_outgoing or cond_node.is_outgoing:
+            is_outgoing = True
+            incoming = [cond_node, self]
+        else:
+            is_outgoing = False
+            incoming = None
+
+        return Layer(
+            Success(), x=[cond_node.y, self.y], incoming=incoming, is_outgoing=is_outgoing
+        ), Layer(
+            Failure(), x=[cond_node.y, self.y], incoming=incoming, is_outgoing=is_outgoing
+        )
 
     def get(self, idx: typing.Union[slice, int], info: Info=None):
         incoming = if_true(self.is_outgoing, self)
@@ -148,16 +199,36 @@ class Layer(Node):
         super().__init__(is_outgoing, incoming, info=info)
         if isinstance(nn_module, typing.List):
             nn_module = nn.Sequential(*nn_module)
-        self._module = nn_module
+        self.op = nn_module
         self._x = x
         self._y = UNDEFINED
         self._incoming = incoming
 
     @property
     def y(self):
+
         if self._y == UNDEFINED and self._x != UNDEFINED:
-            self._y = self._module(self.x) if self._x != EMPTY else self._module()
+
+            if isinstance(self._x, Iterator):
+                self._y = self._eval_iterator(self._x)
+            else:
+                self._y = self._eval(self._x)
+
         return self._y
+    
+    def _eval_iterator(self, x):
+        x: Iterator = x
+        y = []
+        while True:
+            if x.cur == UNDEFINED:
+                break
+            y.append(self._eval(x.cur))
+            x.adv()
+            x.respond(y[-1])
+        return y
+
+    def _eval(self, x):
+        return self.op(x) if x != EMPTY else self.op()
 
     @y.setter
     def y(self, y):
@@ -173,11 +244,11 @@ class Layer(Node):
 
     @property
     def is_parent(self):
-        return isinstance(self._module, Tako)
+        return isinstance(self.op, Tako)
 
     def sub(self) -> typing.Iterator:
         if self.is_parent:
-            for layer in self._module.forward_iter(In(self._x)):
+            for layer in self.op.forward_iter(In(self._x)):
                 yield layer
 
 
@@ -185,6 +256,24 @@ class Layer(Node):
 # one that has a module and no x and
 # one that has an x and no module
 # figure out how to organize these
+
+class Failure(nn.Module):
+    
+    def forward(self, x):
+
+        if x[0] is False:
+            return x[1]
+        return UNDEFINED
+
+
+class Success(nn.Module):
+    
+    def forward(self, x):
+
+        if x[0] is True:
+            return x[1]
+        return UNDEFINED
+        
 
 
 class In(Node):
@@ -214,18 +303,6 @@ class In(Node):
         return False
 
 
-class Join(nn.Module):
-    
-    def __init__(self, n_modules: int):
-        super().__init__()
-        self._n_modules = n_modules
-
-    def forward(self, x):
-        if len(x) > self._n_modules:
-            raise RuntimeError(f"Number of inputs must be equal to {self._n_modules}")
-        return x
-
-
 class Index(nn.Module):
     
     def __init__(self, idx: typing.Union[int, slice]):
@@ -242,6 +319,33 @@ class Tako(nn.Module):
     @abstractmethod
     def forward_iter(self, in_: Node) -> typing.Iterator:
         pass
+
+
+    def probe_ys(self, ys: typing.List[ID], by: typing.Dict[typing.ID, typing.Any]):
+
+        result = {y: UNDEFINED for y in ys}
+
+        for layer in self.forward_iter():
+            for id, x in by.items():
+                if layer.check_id(id):
+                    layer.x = x
+            
+            for y in ys:
+                if layer.check_id(y):
+                    result[y] = layer.y
+        return list(result.value())
+
+    def probe(self, y: ID, by: typing.Dict[typing.ID, typing.Any]):
+
+        # TODO: do I want to raise an exception if UNDEFINED?
+        for layer in self.forward_iter():
+            for id, x in by.items():
+                if layer.check_id(id):
+                    layer.x = x
+            
+            if layer.check_id(y):
+                return layer.y
+
 
     def forward(self, x):
         y = x
@@ -333,77 +437,170 @@ def dive(tako: Tako, in_):
         yield layer_dive(layer)
 
 
+class Loop(Node):
+
+    def __init__(self, layer: Layer, x=UNDEFINED, incoming=None, is_outgoing: bool=False, info: Info=None):
+        super().__init__(is_outgoing, incoming, info)
+        self._layer = layer
+        self._x = x
+        self._incoming = incoming
+        self._is_outgoing = is_outgoing
+    
+    @property
+    def y(self):
+
+        if self._y == UNDEFINED and self._x != UNDEFINED:
+
+            self._layer.x = self.x
+            self._y = self._layer.y
+
+        return self._y
+
+    @y.setter
+    def y(self, y):
+        self._y = y
+
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, x):
+        self._x = x
+
+    @property
+    def is_parent(self):
+        return isinstance(self.op, Tako)
+
+    def sub(self) -> typing.Iterator:
+        if False:
+            yield True
+
+
+class Iterator(object):
+
+    @abstractmethod
+    def iterator(self):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def adv(self) -> bool:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def is_end(self) -> bool:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def reset(self):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def respond(self, y):
+        raise NotImplementedError
+
+
+class ListIterator(Iterator):
+
+    def __init__(self, l: list):
+        self._list = l
+        self._idx = 0
+    
+    def adv(self) -> bool:
+        if self._idx < len(self._list):
+            self._idx += 1
+            return True
+        return False
+    
+    def is_end(self) -> bool:
+        return self._idx == len(self._list) - 1
+    
+    def cur(self):
+        if self.is_end(): return UNDEFINED
+        return self._list[self._idx]
+    
+    def response(self, y):
+        pass
+
+
+
+
 # route
 # route = layer.route()
-# with route.if_() as if_:
+# with route.if_(<condition>) as if_:
+#    if_.to()
 # with route.else_() as else_:
 
-class If_(object):
+# class If_(Node):
 
-    def __enter__(self):
-        pass
-
-
-class Route(Node):
-    
-    def __init__(self, x=UNDEFINED, incoming: Node=None, is_outgoing: bool=False, info: Info=None):
-        pass
-
-    def if_(self, node: Node):
-
-        pass
+#     def __init__(self):
+#         pass
 
 
-class Loop(Node):
-    pass
-
-
-
-# class Index(Node):
-    
-#     def __init__(self, idx: typing.Union[int, slice], x=UNDEFINED, incoming: Node=None, is_outgoing: bool=False, info: Info=None):
-#         super().__init__(is_outgoing, incoming, info)
-#         self._idx = idx
-#         self._x = x
-
-#     @property
-#     def y(self):
-#         if self._y is not UNDEFINED:
-#             return self._y
-#         if self._x is UNDEFINED:
+#     def forward(self):
+#         if x[0] is False:
 #             return UNDEFINED
-
-#         return self._x[self._idx]
-
-#     @y.setter
-#     def y(self, y):
-#         self._y = y
-
-#     @property
-#     def x(self):
-#         return self._x
-
-#     @x.setter
-#     def x(self, x):
-#         self._x = x
-
-#     def to(self, nn_module: typing.Union[typing.List[nn.Module], nn.Module]):
-#         return Layer(nn_module, x=self.y, incoming=self)
+#         return x[1]
 
 
-# class Join(Node):
+# def else_if_(x):
+#     if x[0] != UNDEFINED:
+#         return UNDEFINED
+#     elif x[1] is False:
+#         return UNDEFINED
+
+#     return x[2]
+
+
+# def else_(x):
+
+#     if x[0] != UNDEFINED:
+#         return UNDEFINED
+#     return x[1]
+
+
+
+# if_ = x.if_(lambda x)
+
+
+# else_if = if_.else_if
+
+# with router.if_(lambda x: ) as if_:
+
+#     pass
+
+# with router.else_if(lambda x: ) as else_if:
+#     pass
+
+
+
+
+# class Route(Node):
     
-#     def __init__(self, x=UNDEFINED, incoming: Node=None, is_outgoing: bool=False, info: Info=None):
-#         super().__init__(is_outgoing, Info)
-#         self._x = x
-#         self._incoming = incoming
+#     def __init__(self, cases: typing.List[Case], default: Node=None, x=UNDEFINED, incoming: Node=None, is_outgoing: bool=False, info: Info=None):
+#         super().__init__(is_outgoing, incoming, info)
+#         self.cases = cases
+#         self.default = default
+#         self._info = info
+#         self._y = UNDEFINED
 
 #     @property
 #     def y(self):
-#         if self._y is not UNDEFINED:
+        
+#         if self._y != UNDEFINED or self.x == UNDEFINED:
 #             return self._y
-
-#         return self._x
+        
+#         y = None, None
+#         for i, case in enumerate(self.cases):
+#             case.x = self.x
+#             if case.y[0] is True:
+#                 y = i, case.y[1]
+#                 break
+#         if self.default:
+#             self.default.x = self.x
+#             y = -1, self.default.y
+#         self._y = y
+#         return y
 
 #     @y.setter
 #     def y(self, y):
@@ -417,6 +614,57 @@ class Loop(Node):
 #     def x(self, x):
 #         self._x = x
 
-#     def to(self, nn_module: typing.Union[typing.List[nn.Module], nn.Module]):
-#         return Layer(nn_module, x=self.y, incoming=self)
+#     def is_parent(self):
+#         raise NotImplementedError
 
+#     def sub(self) -> typing.Iterator:
+#         pass
+
+
+
+
+# class Loop(Node):
+
+#     def __init__(self, iterator, process: Node, x=UNDEFINED, incoming: Node=None, is_outgoing: bool=False, info: Info=None):
+#         super().__init__(is_outgoing, incoming, info)
+#         self._iterator = iterator
+#         self._process = process
+#         self._x = x
+#         self._y = UNDEFINED
+
+#     @property
+#     def y(self):
+        
+#         if self._y != UNDEFINED or self.x == UNDEFINED:
+#             return self._y
+
+#         self._iterator.reset()
+#         ys = []
+#         self._iterator.x = self._x
+#         while True: 
+#             self._process.x = self._iterator.cur.x
+#             ys.append(self._process.y)
+#             if self._iterator.adv() == self._iterator.end(): break
+#         self._y = ys
+#         return ys
+
+#     @y.setter
+#     def y(self, y):
+#         self._y = y
+
+#     @property
+#     def x(self):
+#         return self._x
+
+#     @x.setter
+#     def x(self, x):
+#         self._x = x
+
+#     def is_parent(self):
+#         raise NotImplementedError
+
+#     def sub(self) -> typing.Iterator:
+#         pass
+#         # if self.is_parent:
+#         #     for layer in self._module.forward_iter(In(self._x)):
+#         #         yield layer
