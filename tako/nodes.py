@@ -68,25 +68,44 @@ def if_true(val, obj):
     if val is True:
         return obj
 
+
 class Incoming(object):
 
-    def __init__(self, incoming):
+    def __init__(self, incoming=[]):
 
         self._is_list = isinstance(incoming, list)
         self._incoming = incoming
         self._defined = incoming is None
 
+    def add(self, node):
+
+        self._incoming.append(node)
+
+
+class NullIncoming(Incoming):
+
+    def __init__(self, incoming):
+        super().__init__()
+
+    def add(self, node):
+        pass
+
 
 class Node(ABC):
 
     def __init__(
-        self, is_outgoing: bool=False, incoming: Incoming=None, info: Info=None
+        self, x=UNDEFINED, info: Info=None
     ):
         self._info = info or Info()
-        self.is_outgoing = is_outgoing
-        if not isinstance(incoming, Incoming):
-            incoming = Incoming(incoming)
-        self._incoming = incoming
+        self._x = x
+        self._y = UNDEFINED
+        # self.is_outgoing = is_outgoing
+        # if incoming is None:
+        #     incoming = NullIncoming()
+        # elif not isinstance(incoming, Incoming):
+        #     incoming = Incoming(incoming)
+        
+        # self._incoming = incoming
 
     @abstractproperty
     def y(self):
@@ -96,17 +115,16 @@ class Node(ABC):
     def y(self, y):
         raise NotImplementedError
 
-    @abstractproperty
     def x(self):
-        raise NotImplementedError
+        return self._x
 
     @x.setter
     def x(self, x):
-        raise NotImplementedError
+        self._x = x
     
-    def loop(self, layer):
+    def filter(self, layer):
         incoming = if_true(self.is_outgoing, self)
-        return Loop(
+        return Filter(
             layer, x=self.y, incoming=incoming, is_outgoing=self.is_outgoing
         )
 
@@ -193,16 +211,12 @@ class Layer(Node):
 
     def __init__(
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
-        x=UNDEFINED, incoming: typing.Optional[Node]=None, info: Info=None, 
-        is_outgoing: bool=False
+        x=UNDEFINED, info: Info=None, 
     ):
-        super().__init__(is_outgoing, incoming, info=info)
+        super().__init__(x=x, info=info)
         if isinstance(nn_module, typing.List):
             nn_module = nn.Sequential(*nn_module)
         self.op = nn_module
-        self._x = x
-        self._y = UNDEFINED
-        self._incoming = incoming
 
     @property
     def y(self):
@@ -273,7 +287,28 @@ class Success(nn.Module):
         if x[0] is True:
             return x[1]
         return UNDEFINED
-        
+
+
+class Filter(Node):
+    # for setting up IIR/FIR Filter
+    # iterator is a "module" that loops over
+
+    def __init__(self, iterator, x=UNDEFINED):
+        pass
+
+    def adv(self):
+        pass
+
+    def feedback(self, node):
+        # allows for feedback loop
+        pass
+
+    def is_end(self):
+        pass
+
+    def x_i(self):
+        # output the ith element of the filter
+        pass
 
 
 class In(Node):
@@ -394,7 +429,7 @@ class NodeSet(object):
             process.apply(node)
 
 
-class Filter(ABC):
+class Find(ABC):
 
     @abstractmethod
     def check(self, layer: Layer) -> bool:
@@ -437,22 +472,69 @@ def dive(tako: Tako, in_):
         yield layer_dive(layer)
 
 
-class Loop(Node):
+# class Loop(Node):
 
-    def __init__(self, layer: Layer, x=UNDEFINED, incoming=None, is_outgoing: bool=False, info: Info=None):
-        super().__init__(is_outgoing, incoming, info)
-        self._layer = layer
-        self._x = x
-        self._incoming = incoming
-        self._is_outgoing = is_outgoing
+#     def __init__(self, layer: Layer, x=UNDEFINED, incoming=None, is_outgoing: bool=False, info: Info=None):
+#         super().__init__(is_outgoing, incoming, info)
+#         self._layer = layer
+#         self._x = x
+#         self._incoming = incoming
+#         self._is_outgoing = is_outgoing
     
+#     @property
+#     def y(self):
+
+#         if self._y == UNDEFINED and self._x != UNDEFINED:
+
+#             self._layer.x = self.x
+#             self._y = self._layer.y
+
+#         return self._y
+
+#     @y.setter
+#     def y(self, y):
+#         self._y = y
+
+#     @property
+#     def x(self):
+#         return self._x
+
+#     @x.setter
+#     def x(self, x):
+#         self._x = x
+
+#     @property
+#     def is_parent(self):
+#         return isinstance(self.op, Tako)
+
+#     def sub(self) -> typing.Iterator:
+#         if False:
+#             yield True
+
+
+class Accumulator(Node):
+    '''
+    Use with loop to accumulate the nodes
+
+    Need to figure out how to handle 'incoming' properly with this..
+    Probably needs a different kind of 'incoming' in order to perform the loop
+    '''
+
+    def __init__(self, x=UNDEFINED, incoming: Incoming=None, is_outgoing: bool=False, info: Info=None):
+        super().__init__(is_outgoing, incoming, info)
+        self._x = [x]
+    
+    def join(self, node: Node):
+
+        self._incoming.add(node)
+        self._x.append(node.y)
+        self._y = UNDEFINED
+
     @property
     def y(self):
 
         if self._y == UNDEFINED and self._x != UNDEFINED:
-
-            self._layer.x = self.x
-            self._y = self._layer.y
+            self._y = [node.y for node in self._nodes]
 
         return self._y
 
@@ -475,6 +557,7 @@ class Loop(Node):
     def sub(self) -> typing.Iterator:
         if False:
             yield True
+
 
 
 class Iterator(object):
