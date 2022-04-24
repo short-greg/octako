@@ -94,18 +94,17 @@ class NullIncoming(Incoming):
 class Node(ABC):
 
     def __init__(
-        self, x=UNDEFINED, info: Info=None
+        self, x, is_outgoing: bool=False, incoming: Incoming=None, info: Info=None
     ):
         self._info = info or Info()
         self._x = x
-        self._y = UNDEFINED
-        # self.is_outgoing = is_outgoing
-        # if incoming is None:
-        #     incoming = NullIncoming()
-        # elif not isinstance(incoming, Incoming):
-        #     incoming = Incoming(incoming)
+        self.is_outgoing = is_outgoing
+        if incoming is None:
+            incoming = NullIncoming()
+        elif not isinstance(incoming, Incoming):
+            incoming = Incoming(incoming)
         
-        # self._incoming = incoming
+        self._incoming = incoming
 
     @abstractproperty
     def y(self):
@@ -115,6 +114,7 @@ class Node(ABC):
     def y(self, y):
         raise NotImplementedError
 
+    @property
     def x(self):
         return self._x
 
@@ -211,12 +211,15 @@ class Layer(Node):
 
     def __init__(
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
-        x=UNDEFINED, info: Info=None, 
+        x=UNDEFINED, incoming: typing.Optional[Node]=None, info: Info=None, 
+        is_outgoing: bool=False
     ):
-        super().__init__(x=x, info=info)
+        super().__init__(x, is_outgoing, incoming, info=info)
         if isinstance(nn_module, typing.List):
             nn_module = nn.Sequential(*nn_module)
         self.op = nn_module
+        self._y = UNDEFINED
+        self._incoming = incoming
 
     @property
     def y(self):
@@ -249,14 +252,6 @@ class Layer(Node):
         self._y = y
 
     @property
-    def x(self):
-        return self._x
-
-    @x.setter
-    def x(self, x):
-        self._x = x
-
-    @property
     def is_parent(self):
         return isinstance(self.op, Tako)
 
@@ -265,11 +260,6 @@ class Layer(Node):
             for layer in self.op.forward_iter(In(self._x)):
                 yield layer
 
-
-# want two types of "in" nodes
-# one that has a module and no x and
-# one that has an x and no module
-# figure out how to organize these
 
 class Failure(nn.Module):
     
@@ -326,14 +316,6 @@ class In(Node):
         self._x = y
 
     @property
-    def x(self):
-        return self._x
-
-    @x.setter
-    def x(self, x):
-        self._x = x
-
-    @property
     def is_parent(self):
         return False
 
@@ -348,13 +330,11 @@ class Index(nn.Module):
         return x[self._idx]
 
 
-
 class Tako(nn.Module):
 
     @abstractmethod
     def forward_iter(self, in_: Node) -> typing.Iterator:
         pass
-
 
     def probe_ys(self, ys: typing.List[ID], by: typing.Dict[typing.ID, typing.Any]):
 
@@ -472,94 +452,6 @@ def dive(tako: Tako, in_):
         yield layer_dive(layer)
 
 
-# class Loop(Node):
-
-#     def __init__(self, layer: Layer, x=UNDEFINED, incoming=None, is_outgoing: bool=False, info: Info=None):
-#         super().__init__(is_outgoing, incoming, info)
-#         self._layer = layer
-#         self._x = x
-#         self._incoming = incoming
-#         self._is_outgoing = is_outgoing
-    
-#     @property
-#     def y(self):
-
-#         if self._y == UNDEFINED and self._x != UNDEFINED:
-
-#             self._layer.x = self.x
-#             self._y = self._layer.y
-
-#         return self._y
-
-#     @y.setter
-#     def y(self, y):
-#         self._y = y
-
-#     @property
-#     def x(self):
-#         return self._x
-
-#     @x.setter
-#     def x(self, x):
-#         self._x = x
-
-#     @property
-#     def is_parent(self):
-#         return isinstance(self.op, Tako)
-
-#     def sub(self) -> typing.Iterator:
-#         if False:
-#             yield True
-
-
-class Accumulator(Node):
-    '''
-    Use with loop to accumulate the nodes
-
-    Need to figure out how to handle 'incoming' properly with this..
-    Probably needs a different kind of 'incoming' in order to perform the loop
-    '''
-
-    def __init__(self, x=UNDEFINED, incoming: Incoming=None, is_outgoing: bool=False, info: Info=None):
-        super().__init__(is_outgoing, incoming, info)
-        self._x = [x]
-    
-    def join(self, node: Node):
-
-        self._incoming.add(node)
-        self._x.append(node.y)
-        self._y = UNDEFINED
-
-    @property
-    def y(self):
-
-        if self._y == UNDEFINED and self._x != UNDEFINED:
-            self._y = [node.y for node in self._nodes]
-
-        return self._y
-
-    @y.setter
-    def y(self, y):
-        self._y = y
-
-    @property
-    def x(self):
-        return self._x
-
-    @x.setter
-    def x(self, x):
-        self._x = x
-
-    @property
-    def is_parent(self):
-        return isinstance(self.op, Tako)
-
-    def sub(self) -> typing.Iterator:
-        if False:
-            yield True
-
-
-
 class Iterator(object):
 
     @abstractmethod
@@ -607,6 +499,11 @@ class ListIterator(Iterator):
 
 
 
+
+# want two types of "in" nodes
+# one that has a module and no x and
+# one that has an x and no module
+# figure out how to organize these
 
 # route
 # route = layer.route()
@@ -656,6 +553,44 @@ class ListIterator(Iterator):
 #     pass
 
 
+# class Loop(Node):
+
+#     def __init__(self, layer: Layer, x=UNDEFINED, incoming=None, is_outgoing: bool=False, info: Info=None):
+#         super().__init__(is_outgoing, incoming, info)
+#         self._layer = layer
+#         self._x = x
+#         self._incoming = incoming
+#         self._is_outgoing = is_outgoing
+    
+#     @property
+#     def y(self):
+
+#         if self._y == UNDEFINED and self._x != UNDEFINED:
+
+#             self._layer.x = self.x
+#             self._y = self._layer.y
+
+#         return self._y
+
+#     @y.setter
+#     def y(self, y):
+#         self._y = y
+
+#     @property
+#     def x(self):
+#         return self._x
+
+#     @x.setter
+#     def x(self, x):
+#         self._x = x
+
+#     @property
+#     def is_parent(self):
+#         return isinstance(self.op, Tako)
+
+#     def sub(self) -> typing.Iterator:
+#         if False:
+#             yield True
 
 
 # class Route(Node):
@@ -751,3 +686,53 @@ class ListIterator(Iterator):
 #         # if self.is_parent:
 #         #     for layer in self._module.forward_iter(In(self._x)):
 #         #         yield layer
+
+
+
+# class Accumulator(Node):
+#     '''
+#     Use with loop to accumulate the nodes
+
+#     Need to figure out how to handle 'incoming' properly with this..
+#     Probably needs a different kind of 'incoming' in order to perform the loop
+#     '''
+
+#     def __init__(self, x=UNDEFINED, incoming: Incoming=None, is_outgoing: bool=False, info: Info=None):
+#         super().__init__(is_outgoing, incoming, info)
+#         self._x = [x]
+    
+#     def join(self, node: Node):
+
+#         self._incoming.add(node)
+#         self._x.append(node.y)
+#         self._y = UNDEFINED
+
+#     @property
+#     def y(self):
+
+#         if self._y == UNDEFINED and self._x != UNDEFINED:
+#             self._y = [node.y for node in self._nodes]
+
+#         return self._y
+
+#     @y.setter
+#     def y(self, y):
+#         self._y = y
+
+#     @property
+#     def x(self):
+#         return self._x
+
+#     @x.setter
+#     def x(self, x):
+#         self._x = x
+
+#     @property
+#     def is_parent(self):
+#         return isinstance(self.op, Tako)
+
+#     def sub(self) -> typing.Iterator:
+#         if False:
+#             yield True
+
+
