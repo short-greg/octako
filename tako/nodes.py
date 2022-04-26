@@ -93,28 +93,27 @@ class Feedback(object):
         self._key = key
         self._delay = delay
         self._responses = [None] * (delay + 2)
+        self._set = [False] * (delay + 2)
         self._delay_i = delay
         self._cur_i = 0
-        self._set = False
     
     def adv(self):
         self._responses = self._responses[1:] + [None]
+        self._set = self._set[1:] + [False]
         self._delay_i = max(self._delay_i - 1, 0)
         self._cur_i += 1
-        self._set = False
 
-    def set(self, node, delay):
-        if delay != self._delay:
-            raise ValueError(f"Delay value {delay} does not match with delay for feedback {self._delay}")
-        if self._set:
-            raise ValueError(f"Feedback already set for node {self._key}")
-        self._responses[self._delay + 1] = node
-        self._set = True
+    def set(self, value, adv=False):
+        self._responses[self._delay + 1] = value
+        self._set[self._delay + 1] = True
+        if adv:
+            self.adv()
 
-    def get(self, default):
+    def get(self, default=None):
         
-        if self._cur_i < self._delay:
-            return default() if isinstance(default, type(self._f)) else default
+        if not self._set[0]:
+            if default is None: return None
+            return default() # if isinstance(default, type(self._f)) else default
         return self._responses[0]
 
 

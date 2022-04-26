@@ -1,3 +1,4 @@
+from functools import partial
 from uuid import UUID, uuid1
 
 import pytest
@@ -160,3 +161,114 @@ class TestSequence:
         iter_ = seq.forward_iter(in_)
         layer= next(iter_)
         assert (layer.y == NoArg.x).all()
+
+
+class TestRoute:
+
+    def test_route_with_success_outputting_true(self):
+        
+        cond = nodes.In(True)
+        x = th.rand(2)
+        success, failure = nodes.In(x).route(cond)
+
+        assert (success.y == x).all()
+        assert (failure.y == nodes.UNDEFINED)      
+
+    def test_route_with_failure_outputting_true(self):
+        
+        cond = nodes.In(False)
+        x = th.rand(2)
+        success, failure = nodes.In(x).route(cond)
+
+        assert (failure.y == x).all()
+        assert (success.y == nodes.UNDEFINED)        
+
+    def test_route_with_undefined_input(self):
+        
+        cond = nodes.In(False)
+        success, failure = nodes.In().route(cond)
+
+        assert isinstance(failure.y, nodes.Incoming)     
+        assert isinstance(failure.x, nodes.Incoming)     
+
+
+class TestFeedback:
+
+    def test_feedback_get_gets_default(self):
+
+        feedback = nodes.Feedback('c2', 0)
+        result = feedback.get(partial(th.zeros, 2, 2))
+        assert (result == th.zeros(2, 2)).all()
+
+    def test_feedback_get_gets_value(self):
+
+        feedback = nodes.Feedback('c2', 0)
+        x = th.rand(2, 2)
+        feedback.set(x)
+        feedback.adv()
+        result = feedback.get(partial(th.zeros, 2, 2))
+        assert (result == x).all()
+
+    def test_feedback_get_gets_value_with_delay(self):
+
+        feedback = nodes.Feedback('c2',1)
+        x = th.rand(2, 2)
+        feedback.set(x)
+        feedback.adv()
+        feedback.adv()
+        result = feedback.get(partial(th.zeros, 2, 2))
+        assert (result == x).all()
+
+    def test_feedback_get_gets_default_if_not_set(self):
+
+        feedback = nodes.Feedback('c2',0)
+        x = th.rand(2, 2)
+        feedback.set(x)
+        feedback.adv()
+        feedback.adv()
+        result = feedback.get(partial(th.zeros, 2, 2))
+        assert (result == th.zeros(2, 2)).all()
+
+    def test_feedback_in_network(self):
+
+        feedback = nodes.Feedback('c2', 0)
+        x = th.rand(2, 2)
+        feedback.set(x)
+        feedback.adv()
+        in_ = nodes.In(feedback)
+        cur_ = nodes.cur(in_, partial(th.zeros, 2, 2))
+        assert (cur_.y == x).all()
+
+    def test_feedback_in_network_returns_default(self):
+
+        feedback = nodes.Feedback('c2', 1)
+        x = th.rand(2, 2)
+        feedback.set(x)
+        feedback.adv()
+        in_ = nodes.In(feedback)
+        cur_ = nodes.cur(in_, partial(th.zeros, 2, 2))
+        assert (cur_.y == th.zeros(2, 2)).all()
+
+    def test_feedback_retrieval_works_correctly_with_one_delay(self):
+
+        feedback = nodes.Feedback('c2', 1)
+        x = th.rand(2, 2)
+        feedback.set(x)
+        feedback.adv()
+        in_ = nodes.In(feedback)
+        cur_ = nodes.cur(in_, partial(th.zeros, 2, 2))
+        feedback.set(cur_.y, True)
+        assert (feedback.get() == x).all()
+
+    def test_updating_feedback_sets_the_feedback(self):
+
+        feedback = nodes.Feedback('c2', 1)
+        x = th.rand(2, 2)
+        feedback.set(x)
+        feedback.adv()
+        in_ = nodes.In(feedback)
+        cur_ = nodes.cur(in_, partial(th.zeros, 2, 2))
+        feedback.set(cur_.y, True)
+        feedback.adv()
+        assert (feedback.get() == th.zeros(2, 2)).all()
+
