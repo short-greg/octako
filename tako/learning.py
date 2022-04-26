@@ -82,15 +82,6 @@ class MachineComponent(nn.Module):
     """Base class for component. Use to build up a Learning Machine
     """
 
-    def __init__(self, device='cpu'):
-        super().__init__()
-        self.to(device)
-        self._device = device
-    
-    def to(self, device):
-        super().to(device)
-        self._device = device
-
     def is_(self, component_cls):
         if isinstance(self, component_cls):
             return True
@@ -99,6 +90,8 @@ class MachineComponent(nn.Module):
 class Learner(MachineComponent):
     """Update the machine parameters
     """
+    VALIDATION = 'validation'
+    LOSS = 'loss'
 
     @abstractmethod
     def learn(self, x, t):
@@ -109,11 +102,6 @@ class Learner(MachineComponent):
             t ([type]): The target values to map to
         """
         raise NotImplementedError
-
-
-class Tester(MachineComponent):
-    """Evaluate the machine
-    """
 
     @abstractmethod
     def test(self, x, t):
