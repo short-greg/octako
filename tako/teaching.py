@@ -75,16 +75,6 @@ class Chart(object):
         self._current = None
         self._children = dict()
     
-    # def child(self, category: str, name: str, iter_name: str, n_iterations: int=None):
-        
-    #     if (category, name) in self._children:
-    #         return self._children[(category, name)]
-
-    #     # accessor = ChartAccessor(category, name, iter_name=iter_name, chart=self, n_iterations=n_iterations)
-    
-    #     self._children[(category, name)] = accessor
-    #     return accessor
-
     def update(self, teacher: str, epoch: int, iteration: int, n_iterations: int, result: dict):
         
         self._current = teacher
@@ -99,25 +89,6 @@ class Chart(object):
         }
         cur = pd.DataFrame(data, index=[0])
         self.df = pd.concat([self.df, cur], ignore_index=True)
-
-    # def add_result(self, teacher: str, progress: dict, result: dict):
-        
-    #     self._current = teacher
-    #     self._progress[teacher].update(progress)
-    #     self._results[teacher].update(result)
-    #     # self._result_cols[teacher] = set(
-    #     #     [*self._result_cols.get(teacher, []), *result.keys()]
-    #     # )
-    #     # self._progress_cols[teacher] = set(
-    #     #     [*self._progress_cols.get(teacher, []), *progress.keys()]
-    #     # )
-    #     data = {
-    #         "Teacher": teacher,
-    #         **progress,
-    #         **result
-    #     }
-    #     cur = pd.DataFrame(data, index=[0])
-    #     self.df = pd.concat([self.df, cur], ignore_index=True)
     
     def progress(self, teacher: str=None) -> Progress:
         teacher = self.cur if teacher is None else teacher
@@ -127,24 +98,16 @@ class Chart(object):
     def cur(self) -> str:
         return self._current
 
-    # def results(self, teacher: str=None):
-    #     teacher = teacher if teacher is not None else self._current
-    #     # return self.df[self.df["Teacher"] == teacher][self._result_cols[teacher]]
-    #     return self._results[teacher]
-    
-    # def progress(self, teacher: str=None):
-    #     teacher = teacher if teacher is not None else self._current
-    #     return self._progress[teacher]
-    
-    def score(self, teacher: str=None):
+    def results(self, teacher: str=None):
         teacher = teacher if teacher is not None else self._current
-        return self._results[teacher].score(
-            self._progress[teacher].cur(self.df["Teacher"] == teacher)
-        )
-        # self.df[
-        #     (self.df["Teacher"] == teacher) & 
-        #     (self.df[""])
-        # ] # [self._result_cols[teacher]]
+        df = self.df[self.df["Teacher"] == teacher]
+        return self.df[['Teacher', 'Epoch', 'Iteration', 'N Iterations', *self._result_cols[teacher]]]
+
+    # def score(self, teacher: str=None):
+    #     teacher = teacher if teacher is not None else self._current
+    #     return self._results[teacher].score(
+    #         self._progress[teacher].cur(self.df["Teacher"] == teacher)
+    #     )
     
     def state_dict(self):
         return {
@@ -886,98 +849,3 @@ class TestingCourseDirector(StandardCourseDirector):
 
     def score(self):
         return self._chart.score('Tester', True)
-
-
-# class ChartAccessor(object):
-
-#     def __init__(
-#         self, name_category: str, name: str, iter_name: str, chart: Chart, 
-#         n_iterations: int= None, state: dict=None
-#     ):
-#         """initializer
-
-#         Args:
-#             category (str): Name of the teacher category
-#             name (str): Name of the teacher
-#             iter_name (str): Name of the iterator
-#             chart (Chart): 
-#             n_iterations (int, optional): _description_. Defaults to None.
-#             state (dict, optional): _description_. Defaults to None.
-#         """
-#         self._name_category = name_category
-#         self._chart = chart
-#         self._state = state or {}
-#         self._name = name
-#         self._iter_name = iter_name
-#         self._n_iterations = n_iterations
-#         self._cur_iteration = 0
-#         self._children = dict()
-    
-#     def update(self):
-#         self._cur_iteration += 1
-
-#     @property
-#     def local_state(self):
-#         return {
-#             self._name_category: self._name,
-#             self._iter_name: self._cur_iteration,
-#             f'N_{self._iter_name}': self._n_iterations, 
-#         }
-    
-#     @property
-#     def chart(self) -> Chart:
-#         return self._chart
-
-#     @property
-#     def iteration(self) -> int:
-#         return self._cur_iteration
-
-#     @property
-#     def n_iterations(self) -> int:
-#         return self._n_iterations
-    
-#     @property
-#     def results(self) -> typing.Optional[pd.DataFrame]:
-#         if self._name_category not in set(self._chart.df.columns):
-#             return None
-#         return self._chart.df[self._chart.df[self._name_category] == self._name]
-
-#     def child(self, category: str, name: str, iter_name: str=None, n_iterations: int=-1):
-#         """Create a child progress accessor
-
-#         Args:
-#             category (str): Name of the category
-#             name (str): Name of the teacher
-#             iter_name (str): Name of the iteration column
-#             n_iterations (int, optional): Total number of iterations
-
-#         Returns:
-#             ChartAccesssor: Chart accessor with state 
-#         """
-#         if (category, name) in self._children:
-#             return self._children[(category, name)]
-
-#         state = {
-#             **self._state,
-#             **self.local_state
-#         }
-#         accessor = ChartAccessor(
-#             category, name, iter_name, self._chart, n_iterations, state
-#         )
-#         self._children[(category, name)] = accessor
-#         return accessor
-
-#     def add_result(self, teacher: str, result: dict):
-#         """_summary_
-
-#         Args:
-#             result (dict): _description_
-#         """
-        
-#         progress = {
-#             **self.local_state,
-#             **self._state
-#         }
-#         self._chart.add_result(
-#             teacher, progress, result
-#         )
