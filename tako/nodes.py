@@ -82,29 +82,53 @@ class Incoming(object):
         self._incoming.append(node)
 
 
-class NullIncoming(Incoming):
+class Feedback(object):
 
-    def __init__(self, incoming):
-        super().__init__()
-
-    def add(self, node):
+    # use to get function type in feedback
+    def _f():
         pass
+
+    def __init__(self, key, delay: int=0):
+
+        self._key = key
+        self._delay = delay
+        self._responses = [None] * (delay + 2)
+        self._delay_i = delay
+        self._cur_i = 0
+        self._set = False
+    
+    def adv(self):
+        self._responses = self._responses[1:] + [None]
+        self._delay_i = max(self._delay_i - 1, 0)
+        self._cur_i += 1
+        self._set = False
+
+    def set(self, node, delay):
+        if delay != self._delay:
+            raise ValueError(f"Delay value {delay} does not match with delay for feedback {self._delay}")
+        if self._set:
+            raise ValueError(f"Feedback already set for node {self._key}")
+        self._responses[self._delay + 1] = node
+        self._set = True
+
+    def get(self, default):
+        
+        if self._cur_i < self._delay:
+            return default() if isinstance(default, type(self._f)) else default
+        return self._responses[0]
+
+
+def is_defined(x):
+    return not isinstance(x, Incoming) and x != UNDEFINED
 
 
 class Node(ABC):
 
     def __init__(
-        self, x, is_outgoing: bool=False, incoming: Incoming=None, info: Info=None
+        self, x, info: Info=None
     ):
         self._info = info or Info()
         self._x = x
-        self.is_outgoing = is_outgoing
-        if incoming is None:
-            incoming = NullIncoming()
-        elif not isinstance(incoming, Incoming):
-            incoming = Incoming(incoming)
-        
-        self._incoming = incoming
 
     @abstractproperty
     def y(self):
@@ -122,30 +146,12 @@ class Node(ABC):
     def x(self, x):
         self._x = x
     
-    def filter(self, layer):
-        incoming = if_true(self.is_outgoing, self)
-        return Filter(
-            layer, x=self.y, incoming=incoming, is_outgoing=self.is_outgoing
-        )
-
     def to(
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
         info: Info=None
     ):
-        incoming = if_true(self.is_outgoing, self)
         return Layer(
-            nn_module, x=self.y, incoming=incoming, 
-            info=info, is_outgoing=self.is_outgoing
-        )
-
-    def empty(
-        self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
-        info: Info=None
-    ):
-        incoming = if_true(self.is_outgoing, self)
-        return Layer(
-            nn_module, x=EMPTY, incoming=incoming, 
-            info=info, is_outgoing=self.is_outgoing
+            nn_module, x=self.y, info=info
         )
 
     @abstractproperty
@@ -157,75 +163,116 @@ class Node(ABC):
             return False
         return self._info.id == id
 
-    def sub(self) -> typing.Iterator:
+    def children(self) -> typing.Iterator:
         if self.is_parent:
             for layer in self._module.forward_iter(In(self._x)):
                 yield layer
 
     def join(self, *others, info: Info=None, join_f=require):
-        is_outgoing = self.is_outgoing
-        ys = [self.y]
-        for other in others:
-            is_outgoing = is_outgoing or other.is_outgoing
-            ys.append(other.y)
         
-        # TODO: Finish.. Need to set up incoming correctly.. Multiple incoming
-        if is_outgoing:
-            incoming = [self, *others]
-        else:
-            incoming = None
+        ys = []
+        defined = True
+        for node in [self, *others]:
+            if not is_defined(node.y):
+                defined = False
+            ys.append(node.y)
         
+        if not defined:
+            ys = Incoming(ys)
         return Layer(
             nn_module=F(join_f),
-            x=ys, 
-            incoming=incoming, is_outgoing=is_outgoing, info=info
+            x=ys, info=info
         )
 
     def route(self, cond_node):
 
-        if self.is_outgoing or cond_node.is_outgoing:
-            is_outgoing = True
-            incoming = [cond_node, self]
-        else:
-            is_outgoing = False
-            incoming = None
+        ys = [cond_node.y, self.y]
+        if not (is_defined(cond_node.y) and is_defined(self.y)):
+            ys = Incoming(ys)
 
         return Layer(
-            Success(), x=[cond_node.y, self.y], incoming=incoming, is_outgoing=is_outgoing
+            Success(), x=ys
         ), Layer(
-            Failure(), x=[cond_node.y, self.y], incoming=incoming, is_outgoing=is_outgoing
+            Failure(), x=ys
         )
 
     def get(self, idx: typing.Union[slice, int], info: Info=None):
-        incoming = if_true(self.is_outgoing, self)
         return Layer(
-            Index(idx), x=self.y, incoming=incoming, 
-            is_outgoing=self.is_outgoing, info=info
+            Index(idx), x=self.y, info=info
         )
 
     def __getitem__(self, idx: int):
         return self.get(idx)
+
+    # def filter(self, layer):
+    #     return Filter(
+    #         layer, x=self.y
+    #     )
+
+    # # TODO: Reconsider if this is really how I want to do it
+    # # probably best just to have another "in" node
+    # def empty(
+    #     self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
+    #     info: Info=None
+    # ):
+    #     # 
+    #     return Layer(
+    #         NoArg(nn_module), x=self.y, info=info
+    #     )
+
+
+class Cur(nn.Module):
+
+    def __init__(self, default_f):
+        super().__init__()
+        self._default_f = default_f
+
+    def forward(self, x: Feedback):
+        return x.get(self._default_f)
+
+
+def cur(feedback: Node, default_f):
+    return feedback.to(Cur(default_f))
+
+
+class Process(ABC):
+
+    @abstractmethod
+    def apply(self, node: Node):
+        pass
+
+
+class NodeSet(object):
+
+    def __init__(self, nodes: typing.List[Node]):
+        self._nodes = nodes
+    
+    def apply(self, process: Process):
+        for node in self._nodes:
+            process.apply(node)
 
 
 class Layer(Node):
 
     def __init__(
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
-        x=UNDEFINED, incoming: typing.Optional[Node]=None, info: Info=None, 
-        is_outgoing: bool=False
+        x=UNDEFINED, info: Info=None
     ):
-        super().__init__(x, is_outgoing, incoming, info=info)
+        super().__init__(x, info=info)
         if isinstance(nn_module, typing.List):
             nn_module = nn.Sequential(*nn_module)
         self.op = nn_module
         self._y = UNDEFINED
-        self._incoming = incoming
 
     @property
     def y(self):
 
-        if self._y == UNDEFINED and self._x != UNDEFINED:
+        if self._y == UNDEFINED and isinstance(self._x, Incoming):
+            return Incoming(self)
 
+        elif self._y == UNDEFINED and self._x != UNDEFINED:
+
+            # Think whether to keep this
             if isinstance(self._x, Iterator):
                 self._y = self._eval_iterator(self._x)
             else:
@@ -255,7 +302,7 @@ class Layer(Node):
     def is_parent(self):
         return isinstance(self.op, Tako)
 
-    def sub(self) -> typing.Iterator:
+    def children(self) -> typing.Iterator:
         if self.is_parent:
             for layer in self.op.forward_iter(In(self._x)):
                 yield layer
@@ -279,36 +326,16 @@ class Success(nn.Module):
         return UNDEFINED
 
 
-class Filter(Node):
-    # for setting up IIR/FIR Filter
-    # iterator is a "module" that loops over
-
-    def __init__(self, iterator, x=UNDEFINED):
-        pass
-
-    def adv(self):
-        pass
-
-    def feedback(self, node):
-        # allows for feedback loop
-        pass
-
-    def is_end(self):
-        pass
-
-    def x_i(self):
-        # output the ith element of the filter
-        pass
-
 
 class In(Node):
 
-    def __init__(self, x=UNDEFINED, is_outgoing: bool=False, info: Info=None):
-        super().__init__(is_outgoing, None, info)
-        self._x = x
+    def __init__(self, x=UNDEFINED, info: Info=None):
+        super().__init__(x, info)
 
     @property
     def y(self):
+        if self._x == UNDEFINED:
+            return Incoming(self)
         return self._x
 
     @y.setter
@@ -336,7 +363,7 @@ class Tako(nn.Module):
     def forward_iter(self, in_: Node) -> typing.Iterator:
         pass
 
-    def probe_ys(self, ys: typing.List[ID], by: typing.Dict[typing.ID, typing.Any]):
+    def probe_ys(self, ys: typing.List[ID], by: typing.Dict[ID, typing.Any]):
 
         result = {y: UNDEFINED for y in ys}
 
@@ -350,7 +377,7 @@ class Tako(nn.Module):
                     result[y] = layer.y
         return list(result.value())
 
-    def probe(self, y: ID, by: typing.Dict[typing.ID, typing.Any]):
+    def probe(self, y: ID, by: typing.Dict[ID, typing.Any]):
 
         # TODO: do I want to raise an exception if UNDEFINED?
         for layer in self.forward_iter():
@@ -383,12 +410,6 @@ class Sequence(Tako):
             yield cur
 
 
-class Process(ABC):
-
-    @abstractmethod
-    def apply(self, node: Node):
-        pass
-
 
 class LambdaProcess(Process):
 
@@ -397,16 +418,6 @@ class LambdaProcess(Process):
 
     def apply(self, node: Node):
         self._f(node)
-
-
-class NodeSet(object):
-
-    def __init__(self, nodes: typing.List[Node]):
-        self._nodes = nodes
-    
-    def apply(self, process: Process):
-        for node in self._nodes:
-            process.apply(node)
 
 
 class Find(ABC):
@@ -498,6 +509,85 @@ class ListIterator(Iterator):
         pass
 
 
+
+# DECIDE Later if i need filter
+
+
+# class NoArg(nn.Module):
+
+#     def __init__(self, module: nn.Module):
+
+#         super().__init__()
+#         self.module = module
+
+#     def forward(self, *x):
+#         return self.module()
+
+
+# class Feedback(object):
+
+#     def __init__(self):
+#         self._storage: typing.Dict[str, NodeFeedback] = {}
+    
+#     def adv(self):
+#         for node_feedback in self._storage.values():
+#             node_feedback.adv()
+
+#     def set(self, key, node: Node, delay=0):
+
+#         if key not in self._storage:
+#             self._storage[key] = NodeFeedback(key, delay)
+
+#         self._storage[key].set(node, delay)
+
+#     def get(self, key, default=None):
+
+#         if key in self._storage:
+#             return self._storage[key].get()
+        
+#         return default() if isinstance(default, type(_f)) else default
+
+
+
+# class Out(object):
+
+#     def __init__(self):
+#         pass
+
+#     def add(self, node):
+#         pass
+
+#     def adv(self):
+#         pass
+
+
+# class Filter(Node):
+#     # for setting up IIR/FIR Filter
+#     # iterator is a "module" that loops over
+
+#     def __init__(self, f: typing.Callable[[Node, NodeSet, Feedback], typing.Iterator], x=UNDEFINED, info: Info=None):
+        
+#         super().__init__(x, info)
+#         self._f = f
+
+#     @property
+#     def y(self):
+
+#         # 1) set up in_
+#         # 2) set up out
+#         # 3) 
+#         outs = []
+#         feedback = Feedback()
+#         for x_i in self._x:
+#             # create in_i
+#             out = set()
+#             self._f(x_i, out, feedback)
+#             outs.append(out)
+#         # self._y will be based on out
+#         self._y = []
+
+#     def children(self) -> typing.Iterator:
+#         return super().children()
 
 
 # want two types of "in" nodes

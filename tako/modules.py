@@ -72,7 +72,7 @@ class F(nn.Module):
         self.args = args
         self.kwargs = kwargs
     
-    def forward(self, *x):
+    def forward(self, x):
         return self._f(x, *self.args, **self.kwargs)
 
 

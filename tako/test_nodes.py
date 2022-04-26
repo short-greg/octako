@@ -73,7 +73,7 @@ class TestLayer:
         layer2 = nodes.Layer(Null())
         layer3 = layer.join(layer2)
 
-        assert layer3.y == nodes.UNDEFINED
+        assert isinstance(layer3.y, nodes.Incoming)
 
     def test_is_parent_with_sequence(self):
 
@@ -85,7 +85,7 @@ class TestLayer:
 
         sequence = nodes.Sequence([nn.Sigmoid(), nn.Tanh()])
         layer = nodes.Layer(sequence)
-        iter_ =  layer.sub()
+        iter_ =  layer.children()
         layer = next(iter_)
         layer2 = next(iter_)
         assert isinstance(layer.op, nn.Sigmoid)
@@ -95,11 +95,11 @@ class TestLayer:
 
         layer = nodes.Layer(Null())
         with pytest.raises(StopIteration):
-            next(layer.sub())
+            next(layer.children())
 
     def test_empty_method_outputs_empty(self):
 
-        layer = nodes.Layer(Null()).empty(NoArg())
+        layer = nodes.Layer(NoArg(), x=nodes.EMPTY)
         assert (layer.y == NoArg.x).all()
 
 
@@ -125,7 +125,7 @@ class TestIn:
     def test_to_is_undefined_using_to_layer(self):
 
         layer = nodes.In().to(nn.Sigmoid())
-        assert layer.y == nodes.UNDEFINED
+        assert isinstance(layer.y, nodes.Incoming)
 
     def test_to_works_with_multiple_modules(self):
 
