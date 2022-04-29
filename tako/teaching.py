@@ -12,27 +12,6 @@ from enum import Enum
 from .learning import Learner
 import uuid
 
-# i like this better
-# could be conflicts in naming
-# Epoch Teacher Iteration
-#       X       0
-# Epoch   Epoch/Iter  Epoch/Teacher Epoch/Teacher/Iter Epoch/Teacher/Results (other results)
-# <>      1           Trainer       0                    ...
-# 
-# make sure the name does not have / in it
-# this should make it easy to query
-
-# y, weight = MemberOut(ModFactory, ['weight'])
-# MemberSet() <- sets the member based on the input
-# probably just need these two
-
-# would need to make it so if the necessary data is available
-# it does not execute the module
-# Shared() <- maybe i don't need this
-
-# Lesson(
-#   'Epoch', [Team(trainer, assistants), Team(validator, assistants)]
-# )
 
 class Status(Enum):
     
@@ -312,6 +291,7 @@ class Teacher(ABC):
         self._id = uuid.uuid4()
         self._status = Status.READY
         self._name = name
+        self._epoch = 0
     
     def id(self):
         return self._id
@@ -379,8 +359,6 @@ class Trainer(Teacher):
             n_iterations=self.n_iterations,
             results=result
         )
-        # progress.add_result(self._name, result)
-        # progress.update()
         self._dataloader.adv()
         self._status = Status.IN_PROGRESS
         return self._status
@@ -392,8 +370,11 @@ class Trainer(Teacher):
         ))
     
     def score(self, chart: Chart):
-        pass
-
+        return chart.df[
+            [(chart.df["Teacher"] == self._name) & 
+            (chart.df["Epoch"] == self._epoch)]
+        ]["Validation"].mean()
+    
     @property
     def n_iterations(self) -> int:
         return len(self._dataloader)
@@ -447,7 +428,10 @@ class Validator(Teacher):
         ))
 
     def score(self, chart: Chart):
-        pass
+        return chart.df[
+            [(chart.df["Teacher"] == self._name) & 
+            (chart.df["Epoch"] == self._epoch)]
+        ]["Validation"].mean()
 
     @property
     def n_iterations(self) -> int:
@@ -694,6 +678,7 @@ class IterationNotifier(Notifier):
         return (not status.is_in_progress) or (chart.progress().iteration != 0 and ((chart.progress().iteration) % self._frequency) == 0)
 
 
+# TODO: Decide whether to keep this
 class TrainerBuilder(object):
     """
     """
@@ -880,3 +865,26 @@ class TestingCourse(StandardCourse):
 
     def score(self):
         return self._chart.score('Tester', True)
+
+
+# i like this better
+# could be conflicts in naming
+# Epoch Teacher Iteration
+#       X       0
+# Epoch   Epoch/Iter  Epoch/Teacher Epoch/Teacher/Iter Epoch/Teacher/Results (other results)
+# <>      1           Trainer       0                    ...
+# 
+# make sure the name does not have / in it
+# this should make it easy to query
+
+# y, weight = MemberOut(ModFactory, ['weight'])
+# MemberSet() <- sets the member based on the input
+# probably just need these two
+
+# would need to make it so if the necessary data is available
+# it does not execute the module
+# Shared() <- maybe i don't need this
+
+# Lesson(
+#   'Epoch', [Team(trainer, assistants), Team(validator, assistants)]
+# )
