@@ -10,6 +10,7 @@ from torch.utils import data as data_utils
 from tqdm import tqdm
 from enum import Enum
 from .learning import Learner
+import uuid
 
 # i like this better
 # could be conflicts in naming
@@ -258,11 +259,9 @@ class AssistantGroup(object):
 
 class Lesson(ABC):
 
-    def __init__(self, category: str, name: str, iter_name: str, assistants: typing.List[Assistant]=None):
+    def __init__(self, name: str, assistants: typing.List[Assistant]=None):
         super().__init__()
         self._assistants = AssistantGroup(assistants)
-        self._category = category
-        self._iter_name = iter_name
         self._name = name
         self._status = Status.READY
 
@@ -310,8 +309,12 @@ class Lesson(ABC):
 class Teacher(ABC):
 
     def __init__(self, name: str):
+        self._id = uuid.uuid4()
         self._status = Status.READY
         self._name = name
+    
+    def id(self):
+        return self._id
 
     @abstractmethod
     def adv(self, chart: Chart) -> Status:
@@ -388,6 +391,9 @@ class Trainer(Teacher):
             self._dataset, self._batch_size, shuffle=self._shuffle
         ))
     
+    def score(self, chart: Chart):
+        pass
+
     @property
     def n_iterations(self) -> int:
         return len(self._dataloader)
@@ -401,6 +407,7 @@ class Trainer(Teacher):
     def state_dict(self):
 
         return {'batch_size': self._batch_size, **super().state_dict()}
+
 
 class Validator(Teacher):
 
@@ -438,6 +445,9 @@ class Validator(Teacher):
         self._dataloader = DataLoaderIter(data_utils.DataLoader(
             self._dataset, self._batch_size
         ))
+
+    def score(self, chart: Chart):
+        pass
 
     @property
     def n_iterations(self) -> int:
@@ -497,18 +507,14 @@ class ProgressBar(Assistant):
 class Lecture(Lesson):
 
     def __init__(
-        self, category: str, iter_name: str, trainer: Trainer, 
+        self, name: str, trainer: Trainer, 
         assistants: typing.List[Assistant]=None
     ):
-        super().__init__(category, trainer.name, iter_name, assistants)
+        super().__init__(name, assistants)
         self._trainer = trainer
         self._cur_iteration = 0
 
     def adv(self, chart: Chart) -> Status:
-        
-        # progress = parent_progress.child(
-        #     self._category, self._name, self._iter_name, self.n_iterations
-        # )
         if self._status.is_finished:
             return self._status
     
@@ -554,8 +560,8 @@ class Lecture(Lesson):
 
 class Workshop(Lesson):
 
-    def __init__(self, category: str, name: str, iter_name: str, lessons: typing.List[Lesson], assistants: typing.List[Assistant]=None, iterations: int=1):
-        super().__init__(category, name, iter_name, assistants)
+    def __init__(self, name: str, lessons: typing.List[Lesson], assistants: typing.List[Assistant]=None, iterations: int=1):
+        super().__init__(name, assistants)
         self._lessons = lessons
         self._iterations = iterations
         self._cur_iteration = 0
@@ -573,10 +579,6 @@ class Workshop(Lesson):
         return self._iterations
 
     def adv(self, chart: Chart) -> Status:
-        
-        # progress = parent_progress.child(
-        #     self._category, self._name, self._iter_name, self._iterations
-        # )
 
         if self._status.is_finished:
             return self._status
@@ -740,7 +742,7 @@ class TrainerBuilder(object):
         return Workshop('Training', 'Workshop', 'Step', lessons, assistants)
 
 
-class CourseDirector(ABC):
+class Course(ABC):
 
     @abstractmethod
     def run(self) -> Chart:
@@ -758,8 +760,16 @@ class CourseDirector(ABC):
     def score(self):
         pass
 
+    @abstractmethod
+    def registered(self, name: str):
+        pass
 
-class StandardCourseDirector(CourseDirector):
+    @property
+    def chart(self):
+        return self._chart
+
+
+class StandardCourse(Course):
     
     def __init__(
         self, training_dataset: data_utils.Dataset, 
@@ -804,7 +814,7 @@ class StandardCourseDirector(CourseDirector):
         return False
 
 
-class ValidationCourseDirector(StandardCourseDirector):
+class ValidationCourse(StandardCourse):
 
     def __init__(
         self, training_dataset: data_utils.Dataset, 
@@ -813,22 +823,30 @@ class ValidationCourseDirector(StandardCourseDirector):
         learner: Learner
     ):
         super().__init__(training_dataset, batch_size, n_epochs, learner)
+
+        self._trainer = Trainer("Trainer", self._learner, self._training_dataset, self._batch_size)
+        self._validator = Validator("Validator", self._learner, self._validation_dataset, self._batch_size)
+
+        self._workshop = Workshop(
+            "Training Workshop",
+            lessons=[Lecture(self._trainer), Lecture(self._validator)], 
+            assistants=ProgressBar(), iterations=self._n_epochs
+        )
         self._validation_dataset = validation_dataset
 
-    def _build_workshop(self) -> Workshop:
+    @property
+    def trainer(self):
+        return self._trainer
 
-        return (
-            TrainerBuilder()
-            .validator('Validator', self._validation_dataset, self._batch_size)
-            .teacher('Teacher', self._training_dataset, self._batch_size)
-            .n_epochs(self._n_epochs)
-        ).build(self._learner)
+    @property
+    def validator(self):
+        return self._validator
 
     def score(self):
         return self._chart.score('Tester', True)
 
 
-class TestingCourseDirector(StandardCourseDirector):
+class TestingCourse(StandardCourse):
 
     def __init__(
         self, training_dataset: data_utils.Dataset, 
@@ -837,15 +855,28 @@ class TestingCourseDirector(StandardCourseDirector):
         learner: Learner
     ):
         super().__init__(training_dataset, batch_size, n_epochs, learner)
+        self._trainer = Trainer("Trainer", self._learner, self._training_dataset, self._batch_size)
+        self._tester = Validator("Tester", self._learner, self._validation_dataset, self._batch_size)
+
+        training_workshop = Workshop(
+            "Training",
+            lessons=[Lecture("Training", self._trainer)], iterations=self._n_epochs
+        )
+        self._workshop = Workshop(
+            "Testing",
+            lessons=[training_workshop, Lecture("Testing", self._tester)], 
+            assistants=ProgressBar(),
+            iterations=1
+        )
         self._testing_dataset = testing_dataset
-    
-    def _build_workshop(self) -> Workshop:
-        return (
-            TrainerBuilder()
-            .tester('Tester', self._training_dataset, self._batch_size)
-            .teacher('Teacher' ,self._training_dataset, self._batch_size)
-            .n_epochs(self._n_epochs)
-        ).build(self._learner)
+
+    @property
+    def trainer(self):
+        return self._trainer
+
+    @property
+    def tester(self):
+        return self._tester
 
     def score(self):
         return self._chart.score('Tester', True)

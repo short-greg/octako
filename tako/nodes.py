@@ -9,6 +9,7 @@ import torch.nn as nn
 from functools import partial, singledispatch, singledispatchmethod
 import uuid
 import time
+from .utils import  ID
 from .modules import F
 
 
@@ -17,7 +18,7 @@ EMPTY = object()
 # EMPTY <- determine how to handle this....
 
 
-# add incoming layer
+# add in¥oming layer
 
 
 # Node = typing.TypeVar('Node')
@@ -31,13 +32,6 @@ EMPTY = object()
 # etc
 # In
 # Layer
-
-
-class ID(object):
-
-    def __init__(self, id: uuid.UUID=None):
-
-        self.x = id if id is not None else uuid.uuid4()
 
 
 def first(x):
@@ -62,11 +56,6 @@ class Info:
     id: str = None
     tags: typing.List[str] = None
     annotation: str = None
-
-
-def if_true(val, obj):
-    if val is True:
-        return obj
 
 
 class Incoming(object):
@@ -203,22 +192,6 @@ class Node(ABC):
     def __getitem__(self, idx: int):
         return self.get(idx)
 
-    # def filter(self, layer):
-    #     return Filter(
-    #         layer, x=self.y
-    #     )
-
-    # # TODO: Reconsider if this is really how I want to do it
-    # # probably best just to have another "in" node
-    # def empty(
-    #     self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
-    #     info: Info=None
-    # ):
-    #     # 
-    #     return Layer(
-    #         NoArg(nn_module), x=self.y, info=info
-    #     )
-
 
 class Cur(nn.Module):
 
@@ -249,6 +222,15 @@ class NodeSet(object):
     def apply(self, process: Process):
         for node in self._nodes:
             process.apply(node)
+
+
+class LambdaProcess(Process):
+
+    def __init__(self, f):
+        self._f = f
+
+    def apply(self, node: Node):
+        self._f(node)
 
 
 class Layer(Node):
@@ -297,15 +279,6 @@ class Layer(Node):
     def y(self, y):
         self._y = y
 
-    @property
-    def is_parent(self):
-        return isinstance(self.op, Tako)
-
-    def children(self) -> typing.Iterator:
-        if self.is_parent:
-            for layer in self.op.forward_iter(In(self._x)):
-                yield layer
-
 
 class Failure(nn.Module):
     
@@ -323,7 +296,6 @@ class Success(nn.Module):
         if x[0] is True:
             return x[1]
         return UNDEFINED
-
 
 
 class In(Node):
@@ -354,112 +326,6 @@ class Index(nn.Module):
 
     def forward(self, x):
         return x[self._idx]
-
-
-class Tako(nn.Module):
-
-    @abstractmethod
-    def forward_iter(self, in_: Node) -> typing.Iterator:
-        pass
-
-    def probe_ys(self, ys: typing.List[ID], by: typing.Dict[ID, typing.Any]):
-
-        result = {y: UNDEFINED for y in ys}
-
-        for layer in self.forward_iter():
-            for id, x in by.items():
-                if layer.check_id(id):
-                    layer.x = x
-            
-            for y in ys:
-                if layer.check_id(y):
-                    result[y] = layer.y
-        return list(result.value())
-
-    def probe(self, y: ID, by: typing.Dict[ID, typing.Any]):
-
-        # TODO: do I want to raise an exception if UNDEFINED?
-        for layer in self.forward_iter():
-            for id, x in by.items():
-                if layer.check_id(id):
-                    layer.x = x
-            
-            if layer.check_id(y):
-                return layer.y
-
-
-    def forward(self, x):
-        y = x
-        for layer in self.forward_iter(In(x)):
-            y = layer.y
-        return y
-
-
-class Sequence(Tako):
-
-    def __init__(self, modules):
-        super().__init__()
-        self._modules = modules
-
-    def forward_iter(self, in_: Node):
-
-        cur = in_ or In()
-        for module in self._modules:
-            cur = cur.to(module)
-            yield cur
-
-
-
-class LambdaProcess(Process):
-
-    def __init__(self, f):
-        self._f = f
-
-    def apply(self, node: Node):
-        self._f(node)
-
-
-class Find(ABC):
-
-    @abstractmethod
-    def check(self, layer: Layer) -> bool:
-        pass
-
-    def extract(self, tako: Tako):
-        return NodeSet(
-            [layer for layer in self.filter(tako) if self.check(layer)]
-        )
-    
-    def apply(self, tako: Tako, process: Process):
-        for layer in self.filter(tako):
-            if self.check(layer):
-                process.apply(layer)
-
-    @abstractmethod
-    def filter(self, tako) -> typing.Iterator:
-        pass
-
-# filter.apply(tako, lambda layer: layer.set('a', 1))
-
-def layer_dive(layer: Layer):
-    """Loop over all sub layers in a layer including 
-
-    Args:
-        layer (Layer): _description_
-
-    Yields:
-        _type_: _description_
-    """
-    for layer_i in layer.sub():
-        if layer_i.is_parent:
-            for layer_j in layer_dive(layer_i):
-                yield layer_j
-        else: yield layer_i
-
-
-def dive(tako: Tako, in_):
-    for layer in tako.forward_iter(in_):
-        yield layer_dive(layer)
 
 
 class Iterator(object):
@@ -506,7 +372,6 @@ class ListIterator(Iterator):
     
     def response(self, y):
         pass
-
 
 
 # DECIDE Later if i need filter
