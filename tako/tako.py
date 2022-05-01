@@ -99,3 +99,30 @@ def layer_dive(layer: Layer):
 def dive(tako: Tako, in_):
     for layer in tako.forward_iter(in_):
         yield layer_dive(layer)
+
+
+class Network(nn.Module):
+
+    def __init__(
+        self, out: typing.Union[Node, NodeSet], 
+        in_: typing.Union[ID, typing.List[ID]], 
+        by
+    ):
+        # specify which nodes to 
+        self._out = out
+        self._in = in_
+        self._by = by
+        # counts = outgoingcount(self._out)
+
+    def forward(self, x):
+        
+        # need to mark which ones
+        # i want to store in by
+        # by = by.update(**self._in, x)
+        # by.outgoing_count(t)
+
+        by = {
+            **self._by,
+            **zip(self._in, x)
+        }
+        return self._out.probe(by)

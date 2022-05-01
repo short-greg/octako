@@ -1,5 +1,6 @@
-
 import uuid
+
+UNDEFINED = object()
 
 class ID(object):
 

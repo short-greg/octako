@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
-from mailbox import NotEmptyError
 from re import X
 import typing
 from numpy import choose, isin
@@ -9,29 +8,8 @@ import torch.nn as nn
 from functools import partial, singledispatch, singledispatchmethod
 import uuid
 import time
-from .utils import  ID
+from .utils import  ID, UNDEFINED
 from .modules import F
-
-
-UNDEFINED = object()
-EMPTY = object()
-# EMPTY <- determine how to handle this....
-
-
-# add in¥oming layer
-
-
-# Node = typing.TypeVar('Node')
-# Layer = typing.TypeVar('Layer')
-# Join = typing.TypeVar('Join')
-
-
-# Limit to these two types of nodes
-# -> Join needs to be a module
-# -> Route needs to be a module
-# etc
-# In
-# Layer
 
 
 def first(x):
@@ -188,6 +166,19 @@ class Node(ABC):
         return Layer(
             Index(idx), x=self.y, info=info
         )
+    
+    def iterate(self, f, n_accumulators: int=1):
+
+        iterator = self.to(Iterator(x=self.y))
+        accumulators = []
+        for _ in range(n_accumulators):
+            accumulators.append(iterator.accumulate())
+        while True:
+            f(iterator.cur, *accumulators)
+            iterator.adv()
+            if iterator.is_end():
+                break
+        return accumulators
 
     def __getitem__(self, idx: int):
         return self.get(idx)
@@ -253,27 +244,27 @@ class Layer(Node):
 
         elif self._y == UNDEFINED and self._x != UNDEFINED:
 
-            # Think whether to keep this
-            if isinstance(self._x, Iterator):
-                self._y = self._eval_iterator(self._x)
-            else:
-                self._y = self._eval(self._x)
+            # # Think whether to keep this
+            # if isinstance(self._x, Iterator):
+            #     self._y = self._eval_iterator(self._x)
+            # else:
+            self._y = self._eval(self._x)
 
         return self._y
     
-    def _eval_iterator(self, x):
-        x: Iterator = x
-        y = []
-        while True:
-            if x.cur == UNDEFINED:
-                break
-            y.append(self._eval(x.cur))
-            x.adv()
-            x.respond(y[-1])
-        return y
+    # def _eval_iterator(self, x):
+    #     x: Iterator = x
+    #     y = []
+    #     while True:
+    #         if x.cur == UNDEFINED:
+    #             break
+    #         y.append(self._eval(x.cur))
+    #         x.adv()
+    #         x.respond(y[-1])
+    #     return y
 
     def _eval(self, x):
-        return self.op(x) if x != EMPTY else self.op()
+        return self.op(x)
 
     @y.setter
     def y(self, y):
@@ -328,47 +319,185 @@ class Index(nn.Module):
         return x[self._idx]
 
 
-class Iterator(object):
+class Loop(Node):
 
-    @abstractmethod
-    def iterator(self):
-        raise NotImplementedError
-    
-    @abstractmethod
     def adv(self) -> bool:
-        raise NotImplementedError
-    
-    @abstractmethod
-    def is_end(self) -> bool:
-        raise NotImplementedError
-    
-    @abstractmethod
-    def reset(self):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def respond(self, y):
-        raise NotImplementedError
-
-
-class ListIterator(Iterator):
-
-    def __init__(self, l: list):
-        self._list = l
-        self._idx = 0
-    
-    def adv(self) -> bool:
-        if self._idx < len(self._list):
-            self._idx += 1
+        if not self.is_end():
+            self._x.adv()
             return True
+
         return False
-    
-    def is_end(self) -> bool:
-        return self._idx == len(self._list) - 1
-    
-    def cur(self):
-        if self.is_end(): return UNDEFINED
-        return self._list[self._idx]
-    
-    def response(self, y):
+
+    def to(self, nn_module, info):
+        if self.y is UNDEFINED:
+            return Layer(
+                nn_module, x=self, info=info
+            )
+        return Layer(
+            nn_module, x=self.y, info=info
+        )
+
+    @property
+    def y(self):
+        if self._x is UNDEFINED or self._x.is_end():
+            self._y = UNDEFINED
+        else:
+            self._y = self._x.cur
+        return self._y
+        
+    def is_end(self):
+        
+        return self._x is UNDEFINED or self._x.is_end()
+
+
+class Filter(nn.Module):
+
+    @abstractmethod
+    def forward(self, x, state=None):
         pass
+
+
+class All(Filter):
+
+    def update(self, x, state=None):
+        if state is None:
+            state = [x, *state]
+        return state
+    
+    def forward(self, state):
+        return th.stack(state)
+
+
+class Last(Filter):
+
+    def update(self, x, state=None): 
+        return x
+    
+    def forward(self, state):
+        return state
+
+
+class Accumulator(Node):
+
+    def __init__(self, loop: Loop, filter: Filter, x=UNDEFINED, info=None):
+        super().__init__(x, info)
+        self._loop = loop
+        self._filter: Filter = filter
+        self._incoming = None
+        self._state = None
+        
+    def from_(self, node: Node):
+        self._incoming = node
+        if node.y is not UNDEFINED:
+            self._state = self._filter.update(node.y, self._state)
+
+    @property
+    def y(self):
+        
+        if self._state is not None:
+            self._y = self._filter(self._state)
+        else:
+            self._y = UNDEFINED
+        return self._y
+
+    # probe needs to check if the loop is at the end
+    # and advance the loop.. if needed
+    def probe(self):
+        pass
+
+
+class Iterator(ABC):
+
+    @abstractmethod
+    def adv(self) -> bool:
+        pass
+
+    @abstractmethod
+    def is_end(self) -> bool:
+        pass
+
+    @abstractproperty
+    def cur(self):
+        pass
+
+
+class Iterate(nn.Module):
+
+    @abstractmethod
+    def forward(self, x) -> Iterator:
+        pass
+
+
+# I think i can do it like this
+#
+# iterator = x.to(Iterator())
+# accumulator = iterator.accumulate()
+
+# with iterator.iterate():
+#     yield iterator.cur
+
+#     layer = iterator.cur.to(nn.Linear())
+#     yield layer
+#     accumulator.from_(layer)
+
+# yield accumulator
+
+# class Iterator(object):
+
+#     @abstractmethod
+#     def iterator(self):
+#         raise NotImplementedError
+    
+#     @abstractmethod
+#     def adv(self) -> bool:
+#         raise NotImplementedError
+    
+#     @abstractmethod
+#     def is_end(self) -> bool:
+#         raise NotImplementedError
+    
+#     @abstractmethod
+#     def reset(self):
+#         raise NotImplementedError
+    
+#     @abstractmethod
+#     def respond(self, y):
+#         raise NotImplementedError
+
+
+# class ListIterator(Iterator):
+
+#     def __init__(self, l: list):
+#         self._list = l
+#         self._idx = 0
+    
+#     def adv(self) -> bool:
+#         if self._idx < len(self._list):
+#             self._idx += 1
+#             return True
+#         return False
+    
+#     def is_end(self) -> bool:
+#         return self._idx == len(self._list) - 1
+    
+#     def cur(self):
+#         if self.is_end(): return UNDEFINED
+#         return self._list[self._idx]
+    
+#     def response(self, y):
+#         pass
+
+# add in¥oming layer
+
+
+# Node = typing.TypeVar('Node')
+# Layer = typing.TypeVar('Layer')
+# Join = typing.TypeVar('Join')
+
+
+# Limit to these two types of nodes
+# -> Join needs to be a module
+# -> Route needs to be a module
+# etc
+# In
+# Layer

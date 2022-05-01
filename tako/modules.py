@@ -3,6 +3,7 @@ import typing
 import torch as th
 from functools import partial
 import torch.nn as nn
+from .utils import UNDEFINED
 
 
 class Null(nn.Module):
@@ -74,6 +75,21 @@ class F(nn.Module):
     
     def forward(self, x):
         return self._f(x, *self.args, **self.kwargs)
+
+
+class Gen(nn.Module):
+
+    def __init__(self, generator: typing.Callable[[], th.Tensor], *args, **kwargs):
+        super().__init__()
+        self._f = f
+        self.args = args
+        self.kwargs = kwargs
+    
+    def forward(self, x: bool):
+
+        if x is True:
+            return self._f(*self.args, **self.kwargs)
+        return UNDEFINED
 
 
 # class Lambda(nn.Module):
