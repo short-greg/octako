@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass
+from operator import is_
 from re import X
 import typing
 from numpy import choose, isin
@@ -38,15 +39,26 @@ class Info:
 
 class Incoming(object):
 
-    def __init__(self, incoming=[]):
+    def __init__(self, node):   
 
-        self._is_list = isinstance(incoming, list)
-        self._incoming = incoming
-        self._defined = incoming is None
+        self._is_value = True
 
-    def add(self, node):
+        if node.y is UNDEFINED:
+            self._is_value = False
+            self._in = node
+        else:
+            self._in = node.y
 
-        self._incoming.append(node)
+    @property
+    def x(self):
+        if self._is_value:
+            return self._in
+        return UNDEFINED
+
+    def probe(self, by):
+        if self._is_value:
+            return self._in
+        return self._in.probe(by)
 
 
 class Feedback(object):
@@ -88,10 +100,17 @@ def is_defined(x):
     return not isinstance(x, Incoming) and x != UNDEFINED
 
 
+def to_incoming(node):
+
+    if node.y is UNDEFINED:
+        return Incoming(node)
+    return node.y
+
+
 class Node(ABC):
 
     def __init__(
-        self, x, info: Info=None
+        self, x=UNDEFINED, info: Info=None
     ):
         self._info = info or Info()
         self._x = x
@@ -106,6 +125,7 @@ class Node(ABC):
 
     @property
     def x(self):
+        if isinstance(self._x, Incoming): return UNDEFINED
         return self._x
 
     @x.setter
@@ -117,66 +137,51 @@ class Node(ABC):
         info: Info=None
     ):
         return Layer(
-            nn_module, x=self.y, info=info
+            nn_module, x=to_incoming(self), info=info
         )
-
-    @abstractproperty
-    def is_parent(self):
-        raise NotImplementedError
 
     def check_id(self, id: ID):
         if self._info.id is None:
             return False
         return self._info.id == id
 
-    def children(self) -> typing.Iterator:
-        if self.is_parent:
-            for layer in self._module.forward_iter(In(self._x)):
-                yield layer
-
     def join(self, *others, info: Info=None, join_f=require):
         
         ys = []
-        defined = True
-        for node in [self, *others]:
-            if not is_defined(node.y):
-                defined = False
-            ys.append(node.y)
         
-        if not defined:
-            ys = Incoming(ys)
-        return Layer(
-            nn_module=F(join_f),
+        for node in [self, *others]:
+            ys.append(to_incoming(node))
+
+        return Join(
             x=ys, info=info
         )
 
     def route(self, cond_node):
 
-        ys = [cond_node.y, self.y]
-        if not (is_defined(cond_node.y) and is_defined(self.y)):
-            ys = Incoming(ys)
-
-        return Layer(
-            Success(), x=ys
-        ), Layer(
-            Failure(), x=ys
+        return Decision(
+            to_incoming(cond_node), to_incoming(self)
+        ), Decision(
+            to_incoming(cond_node), to_incoming(self), positive=False
         )
 
     def get(self, idx: typing.Union[slice, int], info: Info=None):
-        return Layer(
-            Index(idx), x=self.y, info=info
+        return Index(
+            idx, x=to_incoming(self), info=info
         )
     
-    def iterate(self, f, n_accumulators: int=1):
+    def loop(self, f, *filters, info: Info=None):
 
-        iterator = self.to(Iterator(x=self.y))
+        loop = Loop(x=to_incoming(self), info=info)
+        
         accumulators = []
-        for _ in range(n_accumulators):
-            accumulators.append(iterator.accumulate())
+        for filters in zip(filters):
+            accumulators.append(loop.filter(filter))
         while True:
-            f(iterator.cur, *accumulators)
-            iterator.adv()
-            if iterator.is_end():
+            layers = f(loop)
+            for layer, accumulator in zip(layers, accumulators):
+                accumulator.from_(layer)
+            loop.adv()
+            if loop.is_end():
                 break
         return accumulators
 
@@ -224,6 +229,72 @@ class LambdaProcess(Process):
         self._f(node)
 
 
+class Decision(Node):
+
+    def __init__(
+        self, cond_x=UNDEFINED, x=UNDEFINED, positive: bool=True, info: Info=None
+    ):
+        super().__init__(x, info=info)
+        self._y = UNDEFINED
+        self._cond_x = cond_x
+        self._positive = positive
+
+    @property
+    def y(self):
+
+        if not is_defined(self._cond_x) or self._cond_x is not self._positive:
+            return UNDEFINED
+        elif not is_defined(self._x):
+            return UNDEFINED
+        return self._x
+
+    @y.setter
+    def y(self, y):
+        self._y = y
+
+
+class Join(Node):
+
+    def __init__(
+        self, x=UNDEFINED, info: Info=None
+    ):
+        super().__init__(x, info=info)
+        self._y = UNDEFINED
+
+    @property
+    def y(self):
+
+        undefined = False
+        for x_i in self._x:
+            if isinstance(x_i, Incoming):
+                undefined = True
+        
+        if undefined:
+            self._y = UNDEFINED
+        else:
+            self._y = self._x
+
+        return self._y
+
+    @y.setter
+    def y(self, y):
+        self._y = y
+
+
+class Index(Node):
+    
+    def __init__(self, idx: typing.Union[int, slice], x=UNDEFINED, info: Info=None):
+        super().__init__(x, info)
+        self._idx = idx
+
+    @property
+    def y(self):
+        if isinstance(self._x, Incoming):
+            return UNDEFINED
+        else:
+            return self._x[self._idx]
+
+
 class Layer(Node):
 
     def __init__(
@@ -240,64 +311,26 @@ class Layer(Node):
     def y(self):
 
         if self._y == UNDEFINED and isinstance(self._x, Incoming):
-            return Incoming(self)
+            return UNDEFINED
 
         elif self._y == UNDEFINED and self._x != UNDEFINED:
-
-            # # Think whether to keep this
-            # if isinstance(self._x, Iterator):
-            #     self._y = self._eval_iterator(self._x)
-            # else:
-            self._y = self._eval(self._x)
+            self._y = self.op(self._x)
 
         return self._y
     
-    # def _eval_iterator(self, x):
-    #     x: Iterator = x
-    #     y = []
-    #     while True:
-    #         if x.cur == UNDEFINED:
-    #             break
-    #         y.append(self._eval(x.cur))
-    #         x.adv()
-    #         x.respond(y[-1])
-    #     return y
-
-    def _eval(self, x):
-        return self.op(x)
-
     @y.setter
     def y(self, y):
         self._y = y
 
 
-class Failure(nn.Module):
-    
-    def forward(self, x):
-
-        if x[0] is False:
-            return x[1]
-        return UNDEFINED
-
-
-class Success(nn.Module):
-    
-    def forward(self, x):
-
-        if x[0] is True:
-            return x[1]
-        return UNDEFINED
-
-
 class In(Node):
-
-    def __init__(self, x=UNDEFINED, info: Info=None):
-        super().__init__(x, info)
+    
+    @property
+    def x(self):
+        return self._x
 
     @property
     def y(self):
-        if self._x == UNDEFINED:
-            return Incoming(self)
         return self._x
 
     @y.setter
@@ -307,16 +340,6 @@ class In(Node):
     @property
     def is_parent(self):
         return False
-
-
-class Index(nn.Module):
-    
-    def __init__(self, idx: typing.Union[int, slice]):
-        super().__init__()
-        self._idx = idx
-
-    def forward(self, x):
-        return x[self._idx]
 
 
 class Loop(Node):
@@ -331,10 +354,15 @@ class Loop(Node):
     def to(self, nn_module, info):
         if self.y is UNDEFINED:
             return Layer(
-                nn_module, x=self, info=info
+                nn_module, x=Incoming(self), info=info
             )
         return Layer(
             nn_module, x=self.y, info=info
+        )
+    
+    def filter(self, filter, info: Info=None):
+        return Accumulator(
+            self, filter, info=info
         )
 
     @property
@@ -351,6 +379,10 @@ class Loop(Node):
 
 
 class Filter(nn.Module):
+
+    @abstractmethod
+    def update(self, x, state=None):
+        pass
 
     @abstractmethod
     def forward(self, x, state=None):
@@ -426,6 +458,24 @@ class Iterate(nn.Module):
     @abstractmethod
     def forward(self, x) -> Iterator:
         pass
+
+
+# class Failure(nn.Module):
+    
+#     def forward(self, x):
+
+#         if x[0] is False:
+#             return x[1]
+#         return UNDEFINED
+
+
+# class Success(nn.Module):
+    
+#     def forward(self, x):
+
+#         if x[0] is True:
+#             return x[1]
+#         return UNDEFINED
 
 
 # I think i can do it like this

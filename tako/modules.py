@@ -81,7 +81,7 @@ class Gen(nn.Module):
 
     def __init__(self, generator: typing.Callable[[], th.Tensor], *args, **kwargs):
         super().__init__()
-        self._f = f
+        self._f = generator
         self.args = args
         self.kwargs = kwargs
     
