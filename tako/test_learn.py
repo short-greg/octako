@@ -1,5 +1,5 @@
 import pytest
-from .teaching import (
+from .learn import (
     Assistant, AssistantGroup, Chart, ChartAccessor, 
     IterationNotifier, Lecture, Status, Trainer, 
     TrainerBuilder, Validator, Workshop
