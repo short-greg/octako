@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod, abstractproperty
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import math
 from timeit import repeat
 from typing import Generic, Iterator, TypeVar
@@ -667,7 +667,7 @@ class ProgressBar(Assistant):
         n = min(self._n, len(results))
         self._pbar.set_description_str(self._chart.cur)
         self._pbar.set_postfix({
-            **self._chart.progress(),
+            **asdict(self._chart.progress()),
             **results.tail(n).mean(axis=0).to_dict(),
         })
         self._pbar.total = self._chart.progress().n_iterations

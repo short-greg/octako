@@ -410,7 +410,7 @@ class Joint(Node):
         self._x = xs
 
     def _probe_out(self, by):
-        
+        y = []
         for x_i in self._x:
             if is_defined(x_i):
                 y.append(x_i)
