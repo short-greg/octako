@@ -27,6 +27,7 @@ class ID(object):
 
 UNDEFINED = object()
 
+
 class Null(nn.Module):
     """
     Module that does not affect the input
@@ -113,35 +114,6 @@ class Gen(nn.Module):
         return UNDEFINED
 
 
-# class Lambda(nn.Module):
-#     """
-#     Define a module inline
-#     """
-
-#     def __init__(
-#         self, lambda_fn: typing.Callable[[], th.Tensor], *args, **kwargs
-#     ):
-#         """initializer
-
-#         Args:
-#             lambda_fn (typing.Callable[[], torch.Tensor]): Function to process the tensor
-#         """
-
-#         super().__init__()
-#         self._lambda_fn = lambda_fn
-#         self._args = args
-#         self._kwargs = kwargs
-    
-#     def forward(self, *x: th.Tensor):
-#         """Execute the lambda function
-
-#         Returns:
-#             list[torch.Tensor] or torch.Tensor 
-#         """
-#         return self._lambda_fn(*x, *self._args, **self._kwargs)
-
-
-
 
 @dataclass
 class Info:
@@ -211,6 +183,14 @@ class Node(ABC):
         self._outgoing = []
         self._x = UNDEFINED
         self.x = x
+    
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, name):
+        self._name = name
 
     @abstractproperty
     def y(self):
@@ -254,11 +234,9 @@ class Node(ABC):
             nn_module, x=to_incoming(self), info=info
         )
 
-    # TODO: 
-    def join(self, *others, info: Info=None, join_f=require):
+    def join(self, *others, info: Info=None):
         
         ys = []
-        
         for node in [self, *others]:
             ys.append(to_incoming(node))
 
@@ -281,20 +259,20 @@ class Node(ABC):
     
     def loop(self, f, *filters, info: Info=None):
 
-        loop = Loop(x=to_incoming(self), info=info)
+        iterator = Iterator(x=to_incoming(self), info=info)
         
         accumulators = []
         for filter in filters:
-            accumulators.append(loop.filter(filter))
+            accumulators.append(iterator.filter(filter))
         while True:
-            layers = f(loop)
+            layers = f(iterator)
             if isinstance(layers, Node):
                 accumulators[0].from_(layers)
             else:
                 for layer, accumulator in zip(layers, accumulators):
                     accumulator.from_(layer)
-            loop.adv()
-            if loop.is_end():
+            iterator.adv()
+            if iterator.is_end():
                 break
         return accumulators
 
@@ -428,7 +406,7 @@ class Joint(Node):
         for x_i in x:
             if isinstance(x_i, Node):
                 x_i._add_outgoing(self)
-            xs.append(x)
+            xs.append(x_i)
         self._x = xs
 
     def _probe_out(self, by):
@@ -505,6 +483,10 @@ class In(Node):
     def x(self):
         return self._x
 
+    @x.setter
+    def x(self, x):
+        self._x = x
+
     @property
     def y(self):
         return self._x
@@ -517,14 +499,29 @@ class In(Node):
         return self._x
 
 
-class Loop(Node):
+class Iterator(Node):
+
+    def __init__(
+        self, x=UNDEFINED, name: str=None, info: Info=None
+    ):
+        self._cur = None
+        self._end = False
+        super().__init__(x, name, info)
 
     def adv(self) -> bool:
-        if not self.is_end():
-            self._x.adv()
-            return True
 
-        return False
+        if self._x is UNDEFINED:
+            self._end = True
+
+        if self.is_end():
+            return False
+        try:
+            self._cur = next(self._iter)
+        except StopIteration:
+            self._cur = UNDEFINED
+            self._end = True
+
+        return True
 
     def to(self, nn_module, info: Info=None):
         return Layer(
@@ -535,25 +532,53 @@ class Loop(Node):
         return Accumulator(
             self, filter, info=info
         )
+    
+    @property
+    def x(self):
+        return self._x if is_defined(self._x) else UNDEFINED
+
+    @x.setter
+    def x(self, x):
+        self._cur = None
+        self._end = False
+        self._x = x
+        self._iter = iter(x)
+        self.adv()
 
     @property
     def y(self):
-        if self._x is UNDEFINED or self._x.is_end():
+        if not is_defined(self._cur):
             return UNDEFINED
-        return self._x.cur
+
+        return self._cur
         
     def is_end(self):
-        
-        return self._x is UNDEFINED or self._x.is_end()
+
+        return self._end 
     
     def reset(self):
         if is_defined(self._x):
-            self._x.reset()
+            self._iter = iter(self._x)
+            self.adv()
     
     def _probe_out(self, by):
-        if is_defined(self._x.cur):
-            return self._x.cur
-        return self._x.cur.probe(by)
+        if is_defined(self._x):
+            return self._cur
+        cur = by.get(self._name)
+        if cur is not None:
+            return cur
+
+        x = self._x.probe(by)
+        if x is UNDEFINED:
+            return UNDEFINED
+        
+        try:
+            cur = next(iter(x))
+            by[self.name] = cur
+            return cur
+        except StopIteration:
+            by[self.name] = UNDEFINED
+            return UNDEFINED
 
 
 class Filter(nn.Module):
@@ -563,7 +588,11 @@ class Filter(nn.Module):
         pass
 
     @abstractmethod
-    def forward(self, x, state=None):
+    def forward(self, state=None):
+        pass
+
+    @abstractmethod
+    def spawn(self):
         pass
 
 
@@ -578,6 +607,9 @@ class All(Filter):
     def forward(self, state):
         return th.stack(state)
 
+    def spawn(self):
+        return All()
+
 
 class Last(Filter):
 
@@ -587,24 +619,29 @@ class Last(Filter):
     def forward(self, state):
         return state
 
+    def spawn(self):
+        return Last()
+
 
 class Accumulator(Node):
 
-    def __init__(self, loop: Loop, filter: Filter, x=UNDEFINED, name: str=None, info=None):
+    def __init__(self, loop: Iterator, filter: Filter, x=UNDEFINED, name: str=None, info=None):
         super().__init__(x, name, info)
         self._loop = loop
         self._filter: Filter = filter
         self._state = None
-        
+    
     def from_(self, node: Node):
         if is_defined(node.y):
-            self.x = self._filter.update(node.y, self.x)
+            self._state = self._filter.update(node.y, self._state)
         else:
             self.x = node
 
     @property
     def y(self):
         
+        if self.x is not UNDEFINED:
+            self._state = self._filter(self.x, self._state)
         if self._state is not None:
             self._y = self._filter(self._state)
         else:
@@ -617,56 +654,35 @@ class Accumulator(Node):
         
         if self._x == UNDEFINED:
             return UNDEFINED
-    
-        iterator = self.loop.probe(by)
-        if iterator is UNDEFINED:
-            return UNDEFINED
         
-        iterator = iterator.spawn()
-        self.loop.set_by(iterator)
-
         filter = self._filter.spawn()
         state = None
-        while not iterator.is_end():
-            state = filter.update(self._x.probe(by), state)
-            iterator.adv()
+
+        while True:
+            x = self._x.probe(by)
+
+            if x is UNDEFINED:
+                break
+
+            state = filter.update(x, state)
+
+            cur_it = by[self._loop.name]
+            if cur_it is UNDEFINED:
+                break
+            
+            # update the current iterator position
+            # and store so it will be advanced for the
+            # next probe
+            try:
+                cur_it = next(cur_it)
+                by[self._loop.name] = cur_it
+            except StopIteration:
+                break
+
+        if state is None:
+            return UNDEFINED
+
         return filter(state)
-
-
-class Iterator(object):
-
-    def __init__(self, iterable):
-        self._iterable = iterable
-        self._iter = iter(iterable)
-        self._end = False
-        self._cur = None
-        self.adv()
-
-    def adv(self) -> bool:
-        if self._end:
-            return False
-        try:
-            self._cur = next(self._iter)
-        except StopIteration:
-            self._cur = UNDEFINED
-            self._end = True
-
-    def is_end(self) -> bool:
-        return self._end
-
-    def reset(self):
-        self._iter = iter(self._iterable)
-        self.adv()
-
-    @property
-    def cur(self):
-        return self._cur
-
-
-class Iterate(nn.Module):
-
-    def forward(self, x) -> Iterator:
-        return Iterator(x)
 
 
 class Process(ABC):
@@ -679,11 +695,19 @@ class Process(ABC):
 class NodeSet(object):
 
     def __init__(self, nodes: typing.List[Node]):
-        self._nodes = nodes
+        self._nodes = {node.name: node for node in nodes}
     
     def apply(self, process: Process):
-        for node in self._nodes:
-            process.apply(node)
+        for node in self._nodes.values():
+            if isinstance(process, Process):
+                process.apply(node)
+            else:
+                process(node)
+        
+    def __getitem__(self, key: str):
+        if key not in self._nodes:
+            raise KeyError("There is no node named key.")
+        return self._nodes[key]
 
 
 class LambdaProcess(Process):
@@ -693,7 +717,6 @@ class LambdaProcess(Process):
 
     def apply(self, node: Node):
         self._f(node)
-
 
 
 class Tako(nn.Module):
@@ -833,3 +856,69 @@ class Network(nn.Module):
 #         if x_i == UNDEFINED:
 #             return UNDEFINED
 #     return x
+
+
+
+# class Iterator(object):
+
+#     def __init__(self, iterable):
+#         self._iterable = iterable
+#         self._iter = iter(iterable)
+#         self._end = False
+#         self._cur = None
+#         self.adv()
+
+#     def adv(self) -> bool:
+#         if self._end:
+#             return False
+#         try:
+#             self._cur = next(self._iter)
+#         except StopIteration:
+#             self._cur = UNDEFINED
+#             self._end = True
+
+#     def is_end(self) -> bool:
+#         return self._end
+
+#     def reset(self):
+#         self._iter = iter(self._iterable)
+#         self.adv()
+
+#     @property
+#     def cur(self):
+#         return self._cur
+
+
+# class Iterate(nn.Module):
+
+#     def forward(self, x) -> Iterator:
+#         return Iterator(x)
+
+
+# class Lambda(nn.Module):
+#     """
+#     Define a module inline
+#     """
+
+#     def __init__(
+#         self, lambda_fn: typing.Callable[[], th.Tensor], *args, **kwargs
+#     ):
+#         """initializer
+
+#         Args:
+#             lambda_fn (typing.Callable[[], torch.Tensor]): Function to process the tensor
+#         """
+
+#         super().__init__()
+#         self._lambda_fn = lambda_fn
+#         self._args = args
+#         self._kwargs = kwargs
+    
+#     def forward(self, *x: th.Tensor):
+#         """Execute the lambda function
+
+#         Returns:
+#             list[torch.Tensor] or torch.Tensor 
+#         """
+#         return self._lambda_fn(*x, *self._args, **self._kwargs)
+
