@@ -842,83 +842,23 @@ class Network(nn.Module):
         return self._out.probe(by)
 
 
-# def first(x):
+class BinaryClassify(nn.Module):
 
-#     for x_i in x:
-#         if x_i != UNDEFINED:
-#             return x_i
-#     return UNDEFINED
+    def __init__(self, threshold: float=0.5):
 
+        super().__init__()
+        self.threshold = threshold
 
-# def require(x):
-
-#     for x_i in x:
-#         if x_i == UNDEFINED:
-#             return UNDEFINED
-#     return x
+    def forward(self, x: th.Tensor):
+        return (x > self.threshold).float()
 
 
+class Classify(nn.Module):
 
-# class Iterator(object):
+    def __init__(self, dim: int=-1):
 
-#     def __init__(self, iterable):
-#         self._iterable = iterable
-#         self._iter = iter(iterable)
-#         self._end = False
-#         self._cur = None
-#         self.adv()
+        super().__init__()
+        self.dim = dim
 
-#     def adv(self) -> bool:
-#         if self._end:
-#             return False
-#         try:
-#             self._cur = next(self._iter)
-#         except StopIteration:
-#             self._cur = UNDEFINED
-#             self._end = True
-
-#     def is_end(self) -> bool:
-#         return self._end
-
-#     def reset(self):
-#         self._iter = iter(self._iterable)
-#         self.adv()
-
-#     @property
-#     def cur(self):
-#         return self._cur
-
-
-# class Iterate(nn.Module):
-
-#     def forward(self, x) -> Iterator:
-#         return Iterator(x)
-
-
-# class Lambda(nn.Module):
-#     """
-#     Define a module inline
-#     """
-
-#     def __init__(
-#         self, lambda_fn: typing.Callable[[], th.Tensor], *args, **kwargs
-#     ):
-#         """initializer
-
-#         Args:
-#             lambda_fn (typing.Callable[[], torch.Tensor]): Function to process the tensor
-#         """
-
-#         super().__init__()
-#         self._lambda_fn = lambda_fn
-#         self._args = args
-#         self._kwargs = kwargs
-    
-#     def forward(self, *x: th.Tensor):
-#         """Execute the lambda function
-
-#         Returns:
-#             list[torch.Tensor] or torch.Tensor 
-#         """
-#         return self._lambda_fn(*x, *self._args, **self._kwargs)
-
+    def forward(self, x: th.Tensor):
+        return th.argmax(x, dim=self.dim)

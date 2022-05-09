@@ -145,48 +145,6 @@ class Classifier(MachineComponent):
         raise NotImplementedError
 
 
-# class LearningMachine(Learner, Tester):
-#     """Base class for a learning machine
-#     """
-
-#     def __init__(self, device='cpu'):
-#         super().__init__(device)
-#         self._net, self._p = self.build()
-
-#     @abstractmethod
-#     def build(self) -> typing.Tuple[nn.Module, LearnerAttributes]:
-#         raise NotImplementedError
-    
-#     @todevice
-#     @dict_cpuresult
-#     def learn(self, x: torch.Tensor, t: torch.Tensor):
-#         self._p.optim.zero_grad()
-#         loss, validation = self._net.probe(
-#             [self._p.loss, self._p.validation], {self._p.in_.node: x, self._p.t.node: t}
-#         )
-#         loss.backward()
-#         self._p.optim.step()
-#         return {
-#             'Loss': loss,
-#             'Validation': validation
-#         }
-
-#     @todevice
-#     @dict_cpuresult
-#     def test(self, x: torch.Tensor, t: torch.Tensor):
-#         loss, validation = self._net.probe([self._p.loss, self._p.validation], {self._p.in_.node: x, self._p.t.node: t})
-
-#         return {
-#             'Loss': loss,
-#             'Validation': validation
-#         }
-
-#     @todevice
-#     @cpuresult
-#     def forward(self, x: torch.Tensor):
-#         return self._net.probe(self._p.out, by={self._p.in_.node: x})
-
-
 class Status(Enum):
     
     READY = 0
@@ -899,18 +857,6 @@ class Course(ABC):
 
 
 class StandardCourse(Course):
-    
-    # def __init__(
-    #     self, training_dataset: data_utils.Dataset, 
-    #     batch_size: int, n_epochs: int,
-    #     learner: Learner
-    # ):
-    #     self._training_dataset = training_dataset
-    #     self._learner = learner
-    #     self._n_epochs = n_epochs
-    #     self._batch_size = batch_size
-    #     self._workshop = self._build_workshop()
-    #     self._chart = Chart()
     
     def _build_workshop(self) -> Workshop:
         raise NotImplementedError
