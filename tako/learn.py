@@ -95,9 +95,17 @@ class MachineComponent(nn.Module):
     """Base class for component. Use to build up a Learning Machine
     """
 
+    def __init__(self):
+        super().__init__()
+        self._device = 'cpu'
+
     def is_(self, component_cls):
         if isinstance(self, component_cls):
             return True
+    
+    def to(self, device='cpu'):
+        self._device = device
+        super().to(device)
 
 
 class Learner(MachineComponent):
@@ -195,12 +203,19 @@ class Chart(object):
         self._current = id
         self._progress[id] = Progress(epoch, iteration, n_iterations)
         self._result_cols[id].update(result.keys())
+        
+        updated = {}
+        for k, v in result.items():
+            if isinstance(v, torch.Tensor):
+                updated[k] = v.detach().cpu().numpy()
+            else:
+                updated[k] = result[k]
         data = {
             'Teacher': self._registered[id],
             'Epoch': epoch,
             'Iteration': iteration,
             'N Iterations': n_iterations,
-            **result
+            **updated
         }
         cur = pd.DataFrame(data, index=[0])
         self.df = pd.concat([self.df, cur], ignore_index=True)
@@ -223,14 +238,9 @@ class Chart(object):
 
     def results(self, teacher: str=None):
         teacher = teacher if teacher is not None else self._current
-        df = self.df[self.df["Teacher"] == teacher]
-        return df[['Teacher', 'Epoch', 'Iteration', 'N Iterations', *self._result_cols[teacher]]]
-
-    # def score(self, teacher: str=None):
-    #     teacher = teacher if teacher is not None else self._current
-    #     return self._results[teacher].score(
-    #         self._progress[teacher].cur(self.df["Teacher"] == teacher)
-    #     )
+        teacher_name = self._registered[teacher]
+        df = self.df[self.df["Teacher"] == teacher_name]
+        return df[[*self._result_cols[teacher]]]
     
     def state_dict(self):
         return {
@@ -480,7 +490,7 @@ class Teacher(ABC):
 
 class Trainer(Teacher):
 
-    def __init__(self, name: str, chart: Chart, learner, dataset: data_utils.Dataset, batch_size: int, shuffle: bool=True):
+    def __init__(self, name: str, chart: Chart, learner: Learner, dataset: data_utils.Dataset, batch_size: int, shuffle: bool=True):
         
         super().__init__(name, chart)
         self._learner = learner
@@ -541,7 +551,7 @@ class Trainer(Teacher):
 
 class Validator(Teacher):
 
-    def __init__(self, name: str, chart: Chart, learner, dataset: data_utils.Dataset, batch_size: int):
+    def __init__(self, name: str, chart: Chart, learner: Learner, dataset: data_utils.Dataset, batch_size: int):
         super().__init__(name, chart)
         self._learner = learner
         self._dataset = dataset
@@ -597,7 +607,6 @@ class Validator(Teacher):
 
 class ProgressBar(Assistant):
 
-    # pass in the teachers to record the progress for
     def __init__(self, chart: Chart, n: int=100):
 
         self._pbar: tqdm = None
