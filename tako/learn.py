@@ -530,9 +530,9 @@ class Trainer(Teacher):
     
     def score(self):
         return self._chart.df[
-            [(self._chart.df["Teacher"] == self._name) & 
-            (self._chart.df["Epoch"] == self._epoch)]
-        ]["Validation"].mean()
+            (self._chart.df["Teacher"] == self._name) & 
+            (self._chart.df["Epoch"] == self._epoch)
+        ][self._learner.VALIDATION].mean()
     
     @property
     def n_iterations(self) -> int:
@@ -588,9 +588,9 @@ class Validator(Teacher):
 
     def score(self):
         return self._chart.df[
-            [(self._chart.df["Teacher"] == self._name) & 
-            (self._chart.df["Epoch"] == self._epoch)]
-        ]["Validation"].mean()
+            (self._chart.df["Teacher"] == self._name) & 
+            (self._chart.df["Epoch"] == self._epoch)
+        ][self._learner.VALIDATION].mean()
 
     @property
     def n_iterations(self) -> int:
