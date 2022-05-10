@@ -201,7 +201,7 @@ class Chart(object):
         if id not in self._registered:
             raise RuntimeError(f"Teacher {id} has not been registered.")
         self._current = id
-        self._progress[id] = Progress(epoch, iteration, n_iterations)
+        self._progress[id] = Progress(epoch, n_iterations, iteration)
         self._result_cols[id].update(result.keys())
         
         updated = {}
@@ -455,7 +455,7 @@ class Teacher(ABC):
 
     @abstractmethod
     def adv(self) -> Status:
-        self._iteration += 1
+        raise NotImplementedError
     
     def epoch(self):
         self._status = Status.READY
@@ -521,11 +521,13 @@ class Trainer(Teacher):
         )
         self._dataloader_iter.adv()
         self._status = Status.IN_PROGRESS
+        self._iteration += 1
         return self._status
 
     def epoch(self):
         super().epoch()
         self._dataloader_iter = DataLoaderIter(self._dataloader)
+
         # self._dataloader = DataLoaderIter(data_utils.DataLoader(
         #     self._dataset, self._batch_size, shuffle=self._shuffle
         # ))
@@ -538,7 +540,7 @@ class Trainer(Teacher):
     
     @property
     def n_iterations(self) -> int:
-        return self._n_iterations
+        return len(self._dataloader)
 
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
@@ -596,7 +598,7 @@ class Validator(Teacher):
 
     @property
     def n_iterations(self) -> int:
-        return self._n_iterations
+        return len(self._dataloader)
 
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
@@ -631,7 +633,6 @@ class ProgressBar(Assistant):
             self.start(self._chart)
 
         self._pbar.update(1)
-        self._pbar.refresh()
         results = self._chart.results()
         n = min(self._n, len(results))
         self._pbar.set_description_str(self._chart.cur)
@@ -640,6 +641,7 @@ class ProgressBar(Assistant):
             **results.tail(n).mean(axis=0).to_dict(),
         })
         self._pbar.total = self._chart.progress().n_iterations
+        self._pbar.refresh()
 
     def assist(self, status: Status):
 
