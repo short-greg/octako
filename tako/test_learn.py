@@ -285,7 +285,7 @@ class TestIterationNotifier:
         chart.register("x", "xy")
         chart.update("x", 0, 0, 10, {})
         notifier.assist(Status.IN_PROGRESS)
-        assert dummy.assisted is True
+        assert dummy.assisted is False
 
     def test_iteration_notifier_notifies(self):
         chart = Chart()
@@ -293,7 +293,7 @@ class TestIterationNotifier:
         dummy = DummyAssistant()
         notifier = IterationNotifier("Notifier", [dummy], chart, 2)
         chart.register("x", "xy")
-        chart.update("x", 0, 1, 10, {})
+        chart.update("x", 0, 2, 10, {})
         notifier.assist(Status.IN_PROGRESS)
         assert dummy.assisted is True
 
