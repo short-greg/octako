@@ -497,18 +497,19 @@ class Trainer(Teacher):
         self._dataset = dataset
         self._batch_size = batch_size
         self._shuffle = shuffle
-        self._dataloader = DataLoaderIter(data_utils.DataLoader(
-            self._dataset, self._batch_size, shuffle=shuffle
-        ))
-        self._iteration = 0
+        self._dataloader = data_utils.DataLoader(
+            self._dataset, self._batch_size, shuffle=True
+        )
+        self._dataloader_iter = DataLoaderIter(self._dataloader)
+        self._n_iterations = len(self._dataloader)
         
     def adv(self) -> Status:
 
-        if self._status.is_finished or self._dataloader.is_end():
+        if self._status.is_finished or self._dataloader_iter.is_end():
             self._status = Status.FINISHED
             return self._status
         
-        x, t = self._dataloader.cur
+        x, t = self._dataloader_iter.cur
         result = self._learner.learn(x, t)
         
         self._chart.update(
@@ -518,15 +519,16 @@ class Trainer(Teacher):
             n_iterations=self.n_iterations,
             result=result
         )
-        self._dataloader.adv()
+        self._dataloader_iter.adv()
         self._status = Status.IN_PROGRESS
         return self._status
 
     def epoch(self):
         super().epoch()
-        self._dataloader = DataLoaderIter(data_utils.DataLoader(
-            self._dataset, self._batch_size, shuffle=self._shuffle
-        ))
+        self._dataloader_iter = DataLoaderIter(self._dataloader)
+        # self._dataloader = DataLoaderIter(data_utils.DataLoader(
+        #     self._dataset, self._batch_size, shuffle=self._shuffle
+        # ))
     
     def score(self):
         return self._chart.df[
@@ -536,7 +538,7 @@ class Trainer(Teacher):
     
     @property
     def n_iterations(self) -> int:
-        return len(self._dataloader)
+        return self._n_iterations
 
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
@@ -556,17 +558,19 @@ class Validator(Teacher):
         self._learner = learner
         self._dataset = dataset
         self._batch_size = batch_size
-        self._dataloader = DataLoaderIter(data_utils.DataLoader(
+        self._dataloader = data_utils.DataLoader(
             self._dataset, self._batch_size
-        ))
+        )
+        self._dataloader_iter = DataLoaderIter(self._dataloader)
+        self._n_iterations = len(self._dataloader)
 
     def adv(self) -> Status:
 
-        if self._dataloader.is_end():
+        if self._dataloader_iter.is_end():
             self._status = Status.FINISHED
             return self._status
         
-        x, t = self._dataloader.cur
+        x, t = self._dataloader_iter.cur
         result = self._learner.test(x, t)
         self._chart.update(
             id=self._id,
@@ -575,16 +579,14 @@ class Validator(Teacher):
             n_iterations=self.n_iterations,
             result=result
         )
-        self._dataloader.adv()
+        self._dataloader_iter.adv()
         self._status = Status.IN_PROGRESS
         self._iteration += 1
         return self._status
 
     def epoch(self):
         super().epoch()
-        self._dataloader = DataLoaderIter(data_utils.DataLoader(
-            self._dataset, self._batch_size
-        ))
+        self._dataloader_iter = DataLoaderIter(self._dataloader)
 
     def score(self):
         return self._chart.df[
@@ -594,7 +596,7 @@ class Validator(Teacher):
 
     @property
     def n_iterations(self) -> int:
-        return len(self._dataloader)
+        return self._n_iterations
 
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
@@ -838,6 +840,7 @@ class IterationNotifier(Notifier):
     def to_notify(self, status: Status) -> bool:
         return (not status.is_in_progress) or (self._chart.progress().iterations != 0 and ((self._chart.progress().iterations) % self._frequency) == 0)
 
+
 class Course(ABC):
 
     @abstractmethod
@@ -855,10 +858,6 @@ class Course(ABC):
     @abstractmethod
     def score(self):
         pass
-
-    # @abstractmethod
-    # def registered(self, name: str):
-    #     pass
 
     @property
     def chart(self):
