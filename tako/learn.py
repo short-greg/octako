@@ -936,7 +936,7 @@ class ValidationCourse(StandardCourse):
         return self._validator.score()
 
 
-class TestingCourse(Course):
+class TestingCourse(StandardCourse):
 
     def __init__(
         self, training_dataset: data_utils.Dataset, 
