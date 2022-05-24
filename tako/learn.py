@@ -887,6 +887,19 @@ class StandardCourse(Course):
             'n_epochs': self._n_epochs,
             'batch_size': self._batch_size
         }
+
+    @property
+    def status(self) -> Status:
+        return self._workshop.status
+    
+    @abstractproperty
+    def chart(self):
+        pass
+    
+    def __iter__(self) -> typing.Iterator:
+        status = self._workshop.adv()
+        while not status.is_finished:
+            yield self._workshop.adv()
     
     def run(self) -> Chart:
         
@@ -926,6 +939,10 @@ class ValidationCourse(StandardCourse):
         self._validation_dataset = validation_dataset
 
     @property
+    def chart(self):
+        return self._chart
+    
+    @property
     def trainer(self):
         return self._trainer
 
@@ -952,20 +969,24 @@ class TestingCourse(StandardCourse):
         self._training_dataset = training_dataset
         self._testing_dataset = testing_dataset
         self._batch_size = batch_size
-        self._trainer = Trainer("Trainer", self._learner, self._training_dataset, self._batch_size)
-        self._tester = Validator("Tester", self._learner, self._validation_dataset, self._batch_size)
+        self._trainer = Trainer("Trainer", self._chart, self._learner, self._training_dataset, self._batch_size)
+        self._tester = Validator("Tester", self._chart, self._learner, self._testing_dataset, self._batch_size)
 
         training_workshop = Workshop(
-            "Training", self._chart, 
+            "Training", 
             lessons=[Lecture("Training", self._trainer)], iterations=self._n_epochs
         )
         self._workshop = Workshop(
-            "Testing", self._chart, 
+            "Testing",
             lessons=[training_workshop, Lecture("Testing", self._tester)], 
-            assistants=[ProgressBar()],
+            assistants=[ProgressBar(self._chart)],
             iterations=1
         )
         self._testing_dataset = testing_dataset
+
+    @property
+    def chart(self):
+        return self._chart
 
     @property
     def trainer(self):

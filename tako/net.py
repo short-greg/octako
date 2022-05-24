@@ -25,7 +25,13 @@ class ID(object):
         self.x = id if id is not None else uuid.uuid4()
 
 
-UNDEFINED = object()
+class _UNDEFINED:
+
+    def __str__(self):
+        return "UNDEFINED"
+
+
+UNDEFINED = _UNDEFINED()
 
 
 class Null(nn.Module):
@@ -46,6 +52,7 @@ class Null(nn.Module):
         if not self.multiple_xs:
             return x[0]
         return x
+
 
 class Shared(object):
 
@@ -112,7 +119,6 @@ class Gen(nn.Module):
         if x is True:
             return self._f(*self.args, **self.kwargs)
         return UNDEFINED
-
 
 
 @dataclass
@@ -228,10 +234,10 @@ class Node(ABC):
 
     def to(
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
-        info: Info=None
+        name: str=None, info: Info=None
     ):
         return Layer(
-            nn_module, x=to_incoming(self), info=info
+            nn_module, x=to_incoming(self), name=name, info=info
         )
 
     def join(self, *others, info: Info=None):
@@ -257,13 +263,13 @@ class Node(ABC):
             idx, x=to_incoming(self), info=info
         )
     
-    def loop(self, f, *filters, info: Info=None):
+    def loop(self, f, *aggregators, info: Info=None):
 
         iterator = Iterator(x=to_incoming(self), info=info)
         
         accumulators = []
-        for filter in filters:
-            accumulators.append(iterator.filter(filter))
+        for aggregator in aggregators:
+            accumulators.append(iterator.aggregate(aggregator))
         while True:
             layers = f(iterator)
             if isinstance(layers, Node):
@@ -461,6 +467,7 @@ class Layer(Node):
             return UNDEFINED
 
         elif self._y == UNDEFINED and self._x != UNDEFINED:
+            print(self._x)
             self._y = self.op(self._x)
 
         return self._y
@@ -523,14 +530,14 @@ class Iterator(Node):
 
         return True
 
-    def to(self, nn_module, info: Info=None):
+    def to(self, nn_module, name: str=None, info: Info=None):
         return Layer(
-            nn_module, x=to_incoming(self), info=info
+            nn_module, x=to_incoming(self), name=name, info=info
         )
     
-    def filter(self, filter, info: Info=None):
+    def aggregate(self, aggregator, info: Info=None):
         return Accumulator(
-            self, filter, info=info
+            self, aggregator, info=info
         )
     
     @property
@@ -581,7 +588,7 @@ class Iterator(Node):
             return UNDEFINED
 
 
-class Filter(nn.Module):
+class Aggregator(nn.Module):
 
     @abstractmethod
     def update(self, x, state=None):
@@ -596,7 +603,7 @@ class Filter(nn.Module):
         pass
 
 
-class All(Filter):
+class All(Aggregator):
 
     def update(self, x, state=None):
     
@@ -611,7 +618,7 @@ class All(Filter):
         return All()
 
 
-class Last(Filter):
+class Last(Aggregator):
 
     def update(self, x, state=None): 
         return x
@@ -625,15 +632,15 @@ class Last(Filter):
 
 class Accumulator(Node):
 
-    def __init__(self, loop: Iterator, filter: Filter, x=UNDEFINED, name: str=None, info=None):
+    def __init__(self, loop: Iterator, aggregator: Aggregator, x=UNDEFINED, name: str=None, info=None):
         super().__init__(x, name, info)
         self._loop = loop
-        self._filter: Filter = filter
+        self._aggregator: Aggregator = aggregator
         self._state = None
     
     def from_(self, node: Node):
         if is_defined(node.y):
-            self._state = self._filter.update(node.y, self._state)
+            self._state = self._aggregator.update(node.y, self._state)
         else:
             self.x = node
 
@@ -641,21 +648,21 @@ class Accumulator(Node):
     def y(self):
         
         if self.x is not UNDEFINED:
-            self._state = self._filter(self.x, self._state)
+            self._state = self._aggregator(self.x, self._state)
         if self._state is not None:
-            self._y = self._filter(self._state)
+            self._y = self._aggregator(self._state)
         else:
             self._y = UNDEFINED
         return self._y
 
     def _probe_out(self, by):
         if is_defined(self._x):
-            return self._filter(self._x)
+            return self._aggregator(self._x)
         
         if self._x == UNDEFINED:
             return UNDEFINED
         
-        filter = self._filter.spawn()
+        aggregator = self._aggregator.spawn()
         state = None
 
         while True:
@@ -664,7 +671,7 @@ class Accumulator(Node):
             if x is UNDEFINED:
                 break
 
-            state = filter.update(x, state)
+            state = aggregator.update(x, state)
 
             cur_it = by[self._loop.name]
             if cur_it is UNDEFINED:
@@ -682,7 +689,7 @@ class Accumulator(Node):
         if state is None:
             return UNDEFINED
 
-        return filter(state)
+        return aggregator(state)
 
 
 class Process(ABC):
@@ -709,6 +716,12 @@ class NodeSet(object):
             raise KeyError("There is no node named key.")
         return self._nodes[key]
 
+    def probe(self, by):
+        result = []
+        for node in self._nodes:
+            result.append(node.probe(by))
+        return result
+
 
 class LambdaProcess(Process):
 
@@ -722,33 +735,74 @@ class LambdaProcess(Process):
 class Tako(nn.Module):
 
     @abstractmethod
-    def forward_iter(self, in_: Node) -> typing.Iterator:
+    def forward_iter(self, in_: Node=None) -> typing.Iterator:
         pass
 
-    def probe_ys(self, ys: typing.List[ID], by: typing.Dict[ID, typing.Any]):
+    def sub(self, y: typing.Union[str, typing.List[str]], x: typing.Union[str, typing.List[str]]):
+        """
+        Extract a sub network 
+        """
 
-        result = {y: UNDEFINED for y in ys}
+        x_is_list = isinstance(x, list)
+        y_is_list = isinstance(y, list)
 
-        for layer in self.forward_iter():
-            for id, x in by.items():
-                if layer.check_id(id):
-                    layer.x = x
+        if y_is_list:
+            out = {y_i: UNDEFINED for y_i in y}
+        else:
+            out = UNDEFINED
+        
+        if x_is_list:
+            found = [False] * len(x)
+        else:
+            found = False
+
+        in_ = In()
+        
+        for layer in self.forward_iter(in_):
+            if x_is_list and layer.name in x:
+                idx = x.index(layer.name)
+                in_[idx].rewire(layer)
+                found[idx] = True
+            elif not x_is_list and layer.name == x:
+                in_.rewire(layer)
+                found = True
             
-            for y in ys:
-                if layer.check_id(y):
-                    result[y] = layer.y
-        return list(result.value())
+            if y_is_list and layer.name in y:
+                out[layer.name] = layer
+        
+        if (x_is_list and False in found) or (not x_is_list and found is False):
+            raise RuntimeError()
 
-    def probe(self, y: ID, by: typing.Dict[ID, typing.Any]):
+        if (y_is_list and UNDEFINED in out.values()) or (not y_is_list and out is UNDEFINED):
+            raise RuntimeError()
+        elif y_is_list:
+            return list(out.values())
+        return out      
 
-        # TODO: do I want to raise an exception if UNDEFINED?
-        for layer in self.forward_iter():
+    def probe(self, y: typing.Union[str, typing.List[str]], in_: Node=None, by: typing.Dict[str, typing.Any]=None):
+
+        by = by or {}
+        if isinstance(y, list):
+            out = {y_i: UNDEFINED for y_i in y}
+            is_list = True
+        else:
+            is_list = False
+            out = UNDEFINED
+
+        for layer in self.forward_iter(in_):
             for id, x in by.items():
-                if layer.check_id(id):
-                    layer.x = x
+                if layer.name == id:
+                    layer.y = x
             
-            if layer.check_id(y):
-                return layer.y
+            if is_list and layer.name in out:
+                out[layer.name] = layer.y
+            elif not is_list:
+                if layer.name == y:
+                    return layer.y
+
+        if is_list:
+            return list(out.values())
+        return out
 
     def forward(self, x):
         y = x
@@ -771,13 +825,13 @@ class Sequence(Tako):
             yield cur
 
 
-class Find(ABC):
+class Filter(ABC):
 
     @abstractmethod
     def check(self, layer: Layer) -> bool:
         pass
 
-    def extract(self, tako: Tako):
+    def extract(self, tako: Tako) -> NodeSet:
         return NodeSet(
             [layer for layer in self.filter(tako) if self.check(layer)]
         )
@@ -787,9 +841,21 @@ class Find(ABC):
             if self.check(layer):
                 process.apply(layer)
 
-    @abstractmethod
     def filter(self, tako) -> typing.Iterator:
-        pass
+        for layer in tako.forward_iter():
+            if self.check(layer):
+                yield layer
+
+
+class TagFilter(Filter):
+
+    def __init__(self, filter_tags: typing.List[str]):
+
+        self._filter_tags = set(filter_tags)
+
+    def check(self, layer: Layer) -> bool:
+        return len(self._filter_tags.intersect(layer.info.tags)) > 0
+
 
 # filter.apply(tako, lambda layer: layer.set('a', 1))
 
@@ -819,7 +885,7 @@ class Network(nn.Module):
 
     def __init__(
         self, out: typing.Union[Node, NodeSet], 
-        in_: typing.Union[ID, typing.List[ID]], 
+        in_: typing.Union[ID, typing.List[str]], 
         by
     ):
         # specify which nodes to 

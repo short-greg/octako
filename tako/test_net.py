@@ -1,17 +1,15 @@
+import typing
 import torch as th
 import torch.nn as nn
 from functools import partial
 from uuid import UUID, uuid1
 from . import net
 import pytest
-
-
-# from tako.utils import UNDEFINED
-# from .modules import Null, Gen
 import torch.nn as nn
 import torch as th
 import torch.functional as F
 import torch.nn.functional as FNN
+
 
 # TODO: Still need to test Info, ID etc
 
@@ -234,7 +232,6 @@ class TestIterator:
 
     def test_iterator_with_list(self):
         iterator = net.Iterator([2,3])
-        print(iterator.y)
         assert iterator.y == 2
         iterator.adv()
         assert iterator.y == 3
@@ -296,6 +293,47 @@ class TestSequence:
         iter_ = seq.forward_iter(in_)
         layer= next(iter_)
         assert (layer.y == NoArg.x).all()
+
+
+class TestTako:
+
+    class TakoT(net.Tako):
+
+        X = 'x'
+        Y = 'y'
+
+        def __init__(self):
+            super().__init__()
+            self.linear = nn.Linear(2, 2)
+
+        def forward_iter(self, in_: net.Node=None) -> typing.Iterator:
+            
+            in_ = in_ or net.In()
+            linear = in_.to(self.linear, name=self.X)
+            yield linear
+            sigmoid = linear.to(nn.Sigmoid(), name=self.Y)
+            yield sigmoid
+
+    def test_probe_linear_outputs_correct_value(self):
+        tako = self.TakoT()
+        in_ = th.rand(1, 2)
+        y = tako.probe(tako.X, in_=net.In(in_))
+        assert (y == tako.linear(in_)).all()
+    
+    def test_probe_sigmoid_outputs_correct_value_with_linear(self):
+        tako = self.TakoT()
+        in_ = th.rand(1, 2)
+        y = tako.probe(tako.Y, by={tako.X: in_})
+        assert (y == th.sigmoid(in_)).all()
+    
+    def test_probe_multiple_outputs_correct_value(self):
+        tako = self.TakoT()
+        in_ = th.rand(1, 2)
+        y1, y2 = tako.probe([tako.Y, tako.X], in_=net.In(in_))
+        linear_out = tako.linear(in_)
+        sigmoid_out = th.sigmoid(linear_out)
+        assert (y1 == sigmoid_out).all()
+        assert (y2 == linear_out).all()
 
 
 class TestNodeSet:

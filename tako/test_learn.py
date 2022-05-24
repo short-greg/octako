@@ -1,7 +1,7 @@
 import pytest
 from .learn import (
     Assistant, AssistantGroup, Chart, 
-    IterationNotifier, Lecture, Status, Trainer, 
+    IterationNotifier, Lecture, Status, TestingCourse, Trainer, 
     Validator, Workshop, ValidationCourse
 )
 import torch.utils.data as data_utils
@@ -308,44 +308,36 @@ class TestTrainerBuilder:
 
         course.run()
 
-#     def test_lecturer_finished_once_validator_finished(self):
+    def test_lecturer_finished_once_validator_finished(self):
 
-#         accessor = get_chart_accessor()
-#         workshop = (
-#             TrainerBuilder()
-#             .teacher(get_dataset())
-#             .validator(get_dataset())
-#         ).build(Learner())
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         assert workshop.status.is_finished
+        course = ValidationCourse(
+            get_dataset(), get_dataset(), 
+            32, 1, Learner()
+        )
+        course.run()
+        assert course.status.is_finished
 
-#     def test_lecturer_in_progres_after_trainer_finished(self):
+    def test_lecturer_in_progres_after_trainer_finished(self):
 
-#         accessor = get_chart_accessor()
-#         workshop = (
-#             TrainerBuilder()
-#             .teacher(get_dataset())
-#             .validator(get_dataset())
-#         ).build(Learner())
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         assert workshop.status.is_in_progress
+        course = ValidationCourse(
+            get_dataset(), get_dataset(), 
+            32, 1, Learner()
+        )
+        it = iter(course)
+        next(it)
+        next(it)
+        status = next(it)
+        assert status.is_in_progress
 
-#     def test_lecturer_in_progres_after_trainer_finished(self):
+    def test_lecturer_in_progres_after_trainer_finished(self):
 
-#         accessor = get_chart_accessor()
-#         workshop = (
-#             TrainerBuilder()
-#             .teacher(get_dataset())
-#             .n_epochs(2)
-#         ).build(Learner())
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         workshop.advance(accessor)
-#         assert workshop.status.is_in_progress
+        course = TestingCourse(
+            get_dataset(), get_dataset(), 
+            32, 2, Learner()
+        )
+        it = iter(course)
+        next(it)
+        next(it)
+        status = next(it)
+        assert status.is_in_progress
+
