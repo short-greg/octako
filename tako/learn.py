@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, asdict
 import math
+from os import stat
 from timeit import repeat
 from typing import Generic, Iterator, TypeVar
 import typing
@@ -938,6 +939,18 @@ class ValidationCourse(StandardCourse):
         )
         self._validation_dataset = validation_dataset
 
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        self._learner.load_state_dict(state_dict['learner'])
+        self._chart.load_state_dict(state_dict['chart'])
+
+    def state_dict(self):
+        return {
+            **super().state_dict(),
+            'chart': self._chart.state_dict(),
+            'learner': self._learner.state_dict(),
+        }
+
     @property
     def chart(self):
         return self._chart
@@ -983,6 +996,18 @@ class TestingCourse(StandardCourse):
             iterations=1
         )
         self._testing_dataset = testing_dataset
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        self._learner.load_state_dict(state_dict['learner'])
+        self._chart.load_state_dict(state_dict['chart'])
+
+    def state_dict(self):
+        return {
+            **super().state_dict(),
+            'chart': self._chart.state_dict(),
+            'learner': self._learner.state_dict(),
+        }
 
     @property
     def chart(self):
