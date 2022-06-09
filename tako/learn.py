@@ -104,9 +104,9 @@ class MachineComponent(nn.Module):
         if isinstance(self, component_cls):
             return True
     
-    def to(self, device='cpu'):
+    def set_device(self, device='cpu'):
         self._device = device
-        super().to(device)
+        self.to(device)
 
 
 class Learner(MachineComponent):
@@ -1023,75 +1023,3 @@ class TestingCourse(StandardCourse):
 
     def score(self):
         return self._tester.score()
-
-
-# # TODO: Decide whether to keep this
-# class TrainerBuilder(object):
-#     """
-#     """
-
-#     def __init__(self):
-#         self._teacher_params = None
-#         self._validator_params = None
-#         self._tester_params = None
-#         self._n_epochs = 1
-    
-#     def n_epochs(self, n_epochs: int=1):
-#         self._n_epochs = n_epochs
-#         return self
-
-#     def teacher(self, dataset: data_utils.Dataset, batch_size: int=2**5):
-#         self._teacher_params = (dataset, batch_size)
-#         return self
-
-#     def validator(self, dataset: data_utils.Dataset, batch_size: int=2**5):
-#         self._validator_params = (dataset, batch_size)
-#         return self
-
-#     def tester(self, dataset: data_utils.Dataset, batch_size: int=2**5):
-#         self._tester_params = (dataset, batch_size)
-#         return self
-
-#     def build(self, learner) -> Workshop:
-
-#         sub_teachers = []
-#         if self._teacher_params is not None:
-#             sub_teachers.append(Lecture("Learning", "Iteration", Trainer("Trainer", learner, *self._teacher_params)))
-#         if self._validator_params is not None:
-#             sub_teachers.append(Lecture("Validation", "Iteration", Validator("Validator", learner, *self._validator_params)))
-        
-#         lessons = []
-#         if sub_teachers:
-#             lessons.append(Workshop(
-#                 'Teaching', 'Course',  'Epoch', 
-#                 sub_teachers, iterations=self._n_epochs
-#             ))
-        
-#         if self._tester_params is not None:
-#             lessons.append(Lecture("Testing", Validator("Tester", learner, *self._tester_params)))
-#         assistants = [ProgressBar()]
-        
-#         return Workshop('Training', 'Workshop', 'Step', lessons, assistants)
-
-
-# i like this better
-# could be conflicts in naming
-# Epoch Teacher Iteration
-#       X       0
-# Epoch   Epoch/Iter  Epoch/Teacher Epoch/Teacher/Iter Epoch/Teacher/Results (other results)
-# <>      1           Trainer       0                    ...
-# 
-# make sure the name does not have / in it
-# this should make it easy to query
-
-# y, weight = MemberOut(ModFactory, ['weight'])
-# MemberSet() <- sets the member based on the input
-# probably just need these two
-
-# would need to make it so if the necessary data is available
-# it does not execute the module
-# Shared() <- maybe i don't need this
-
-# Lesson(
-#   'Epoch', [Team(trainer, assistants), Team(validator, assistants)]
-# )

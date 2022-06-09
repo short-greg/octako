@@ -340,4 +340,3 @@ class TestTrainerBuilder:
         next(it)
         status = next(it)
         assert status.is_in_progress
-
