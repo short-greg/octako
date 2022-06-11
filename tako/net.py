@@ -129,12 +129,19 @@ class Info:
 
 class Feedback(object):
     """
-
+    Data structure for storing feedback into the network
+    Use to implement recurrency
     """
     def _f():
         pass
 
-    def __init__(self, key, delay: int=0):
+    def __init__(self, key: str, delay: int=0):
+        """initializer
+
+        Args:
+            key (str): 
+            delay (int, optional): The amount to delay the feedback by. Defaults to 0.
+        """
 
         self._key = key
         self._delay = delay
@@ -144,12 +151,20 @@ class Feedback(object):
         self._cur_i = 0
     
     def adv(self):
+        """Advance the feedback to the next position
+        """
         self._responses = self._responses[1:] + [None]
         self._set = self._set[1:] + [False]
         self._delay_i = max(self._delay_i - 1, 0)
         self._cur_i += 1
 
     def set(self, value, adv=False):
+        """Set the currnt value
+
+        Args:
+            value : Value to set the feedback to 
+            adv (bool, optional): Whether to advance the feedback. Defaults to False.
+        """
         self._responses[self._delay + 1] = value
         self._set[self._delay + 1] = True
         if adv:
@@ -164,15 +179,21 @@ class Feedback(object):
 
 
 def is_defined(x):
+    """Whehter an input is defined
+    """
     return not isinstance(x, Node) and x != UNDEFINED
 
 
 def get_x(node):
+    """Get the value of x
+    """
     if isinstance(node.x, Node): return UNDEFINED
     return node.x
 
 
 def to_incoming(node):
+    """Return y if node is undefined otherwise return the node
+    """
 
     if node.y is UNDEFINED:
         return node
@@ -180,10 +201,19 @@ def to_incoming(node):
 
 
 class Node(ABC):
+    """Base class for all network nodes
+    """
 
     def __init__(
         self, x=UNDEFINED, name: str=None, info: Info=None
     ):
+        """initializer
+
+        Args:
+            x (optional): The input to the node. Defaults to UNDEFINED.
+            name (str, optional): The name of the node. Defaults to None.
+            info (Info, optional): Infor for the node. Defaults to None.
+        """
         self._name = name or str(id(self))
         self._info = info or Info()
         self._outgoing = []
@@ -191,39 +221,75 @@ class Node(ABC):
         self.x = x
     
     @property
-    def name(self):
+    def name(self) -> str:
+        """
+
+        Returns:
+            str: Name of the ndoe
+        """
+        
         return self._name
 
     @name.setter
-    def name(self, name):
+    def name(self, name: str):
         self._name = name
 
     @abstractproperty
     def y(self):
+        """
+        Returns:
+            Node output if defined else Undefined
+        """
         raise NotImplementedError
 
     @y.setter
     def y(self, y):
+        """
+        Args:
+            y (): The output for the node
+        """
         raise NotImplementedError
 
     @property
     def x(self):
+        """
+
+        Returns:
+             The input into the network
+        """
         if isinstance(self._x, Node):
             return UNDEFINED
         return self._x
 
     @x.setter
     def x(self, x):
+        """
+        Args:
+            x (): Set the input to the network
+        """
         if isinstance(self._x, Node):
             self._x._remove_outgoing(self)
         if isinstance(x, Node):
             x._add_outgoing(self)
         self._x = x
 
-    def lookup(self, by):
-        value = by.get(self._name, UNDEFINED)
+    def lookup(self, by: dict):
+        """
+        Args:
+            by (): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        return by.get(self._name, UNDEFINED)
     
     def set_by(self, by, y):
+        """ Set the value of y
+
+        Args:
+            by (dict): 
+            y (): The output to the network
+        """
         by[self.id] = y
     
     def _add_outgoing(self, node):
@@ -236,11 +302,30 @@ class Node(ABC):
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
         name: str=None, info: Info=None
     ):
+        """Connect the layer to another layer
+
+        Args:
+            nn_module (typing.Union[typing.List[nn.Module], nn.Module]): Module
+            name (str, optional): Name of the node. Defaults to None.
+            info (Info, optional): Info for the layer. Defaults to None.
+
+        Returns:
+            Layer: 
+        """
         return Layer(
             nn_module, x=to_incoming(self), name=name, info=info
         )
 
     def join(self, *others, info: Info=None):
+        """_summary_
+
+        Args:
+            *others: nodes to join with
+            info (Info, optional): _description_. Defaults to None.
+
+        Returns:
+            Joint
+        """
         
         ys = []
         for node in [self, *others]:
@@ -251,6 +336,14 @@ class Node(ABC):
         )
 
     def route(self, cond_node):
+        """
+
+        Args:
+            cond_node (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
 
         return Decision(
             to_incoming(cond_node), to_incoming(self)
@@ -259,11 +352,29 @@ class Node(ABC):
         )
 
     def get(self, idx: typing.Union[slice, int], info: Info=None):
+        """Get an index from the output
+
+        Args:
+            idx (typing.Union[slice, int]): 
+            info (Info, optional): _description_. Defaults to None.
+
+        Returns:
+            Index
+        """
         return Index(
             idx, x=to_incoming(self), info=info
         )
     
     def loop(self, f, *aggregators, info: Info=None):
+        """Loop over 
+
+        Args:
+            f (): Iterator function
+            info (Info, optional): Info. Defaults to None.
+
+        Returns:
+            Loop
+        """
 
         iterator = Iterator(x=to_incoming(self), info=info)
         
@@ -290,6 +401,14 @@ class Node(ABC):
         raise NotImplementedError
 
     def probe(self, by):
+        """Probe the layer
+
+        Args:
+            by (dict)
+
+        Returns:
+            result: valeu 
+        """
         value = self._info.lookup(by)
         if value is not None:
             return value
@@ -320,6 +439,15 @@ class Decision(Node):
     def __init__(
         self, cond_x=UNDEFINED, x=UNDEFINED, positive: bool=True, name: str=None, info: Info=None
     ):
+        """initializer
+
+        Args:
+            cond_x (optional): _description_. Defaults to UNDEFINED.
+            x (optional): Input into the decision node. Defaults to UNDEFINED.
+            positive (bool, optional): Whether the node excutes on positive. Defaults to True.
+            name (str, optional): Name of the decision node. Defaults to None.
+            info (Info, optional): Info for the ndoe. Defaults to None.
+        """
         super().__init__(x, name=name, info=info)
         self._y = UNDEFINED
         self._cond_x = cond_x
@@ -364,6 +492,13 @@ class Joint(Node):
     def __init__(
         self, x=UNDEFINED, name: str=None, info: Info=None
     ):
+        """initializer
+
+        Args:
+            x (_type_, optional): Input to the node. Defaults to UNDEFINED.
+            name (str, optional): Name of the node. Defaults to None.
+            info (Info, optional): Info for the node. Defaults to None.
+        """
         super().__init__(x, name=name, info=info)
         self._y = UNDEFINED
 
@@ -388,6 +523,10 @@ class Joint(Node):
     
     @property
     def x(self):
+        """
+        Returns:
+            The input to the node
+        """
         
         if self._x is UNDEFINED:
             return UNDEFINED
@@ -426,6 +565,11 @@ class Joint(Node):
                 
 
 class Index(Node):
+    """
+
+    Args:
+        Node (_type_): _description_
+    """
     
     def __init__(self, idx: typing.Union[int, slice], x=UNDEFINED, name: str=None, info: Info=None):
         super().__init__(x, name, info)
@@ -433,6 +577,11 @@ class Index(Node):
 
     @property
     def y(self):
+        """
+
+        Returns:
+            The output of the node
+        """
         if isinstance(self._x, Node):
             return UNDEFINED
         else:
@@ -454,6 +603,14 @@ class Layer(Node):
         self, nn_module: typing.Union[typing.List[nn.Module], nn.Module], 
         x=UNDEFINED, name: str=None, info: Info=None
     ):
+        """initializer
+
+        Args:
+            nn_module (typing.Union[typing.List[nn.Module], nn.Module]): Module for the layer
+            x (optional): Input to the node. Defaults to UNDEFINED.
+            name (str, optional): Name of the node. Defaults to None.
+            info (Info, optional): Info for the node. Defaults to None.
+        """
         super().__init__(x, name=name, info=info)
         if isinstance(nn_module, typing.List):
             nn_module = nn.Sequential(*nn_module)
@@ -474,6 +631,10 @@ class Layer(Node):
     
     @y.setter
     def y(self, y):
+        """
+        Args:
+            y (): The output of the node
+        """
         self._y = y
     
     def _probe_out(self, by):
@@ -511,11 +672,23 @@ class Iterator(Node):
     def __init__(
         self, x=UNDEFINED, name: str=None, info: Info=None
     ):
+        """initializer
+
+        Args:
+            x (_type_, optional): The input. Defaults to UNDEFINED.
+            name (str, optional): Name of the iterator. Defaults to None.
+            info (Info, optional): Info for the iterator Defaults to None.
+        """
         self._cur = None
         self._end = False
         super().__init__(x, name, info)
 
     def adv(self) -> bool:
+        """advance the iterator forward
+
+        Returns:
+            bool: Whether in progress (True) or at the end (False)
+        """
 
         if self._x is UNDEFINED:
             self._end = True
@@ -530,12 +703,31 @@ class Iterator(Node):
 
         return True
 
-    def to(self, nn_module, name: str=None, info: Info=None):
+    def to(self, nn_module, name: str=None, info: Info=None) -> Layer:
+        """
+
+        Args:
+            nn_module (_type_): 
+            name (str, optional):  Defaults to None.
+            info (Info, optional):  Defaults to None.
+
+        Returns:
+            Layer
+        """
         return Layer(
             nn_module, x=to_incoming(self), name=name, info=info
         )
     
     def aggregate(self, aggregator, info: Info=None):
+        """_summary_
+
+        Args:
+            aggregator (): 
+            info (Info, optional): Info . Defaults to None.
+
+        Returns:
+            Accumulator
+        """
         return Accumulator(
             self, aggregator, info=info
         )
@@ -637,6 +829,14 @@ class Last(Aggregator):
 class Accumulator(Node):
 
     def __init__(self, loop: Iterator, aggregator: Aggregator, x=UNDEFINED, name: str=None, info=None):
+        """
+        Args:
+            loop (Iterator): 
+            aggregator (Aggregator): 
+            x (optional): Input to the accumulator. Defaults to UNDEFINED.
+            name (str, optional): Name of the node. Defaults to None.
+            info (_type_, optional): Info for the node. Defaults to None.
+        """
         super().__init__(x, name, info)
         self._loop = loop
         self._aggregator: Aggregator = aggregator

@@ -155,10 +155,16 @@ class Classifier(MachineComponent):
 
 
 class Status(Enum):
+    """Current status of the lesson
+    """
     
+    # lesson is ready to start
     READY = 0
+    # lesson is in progress
     IN_PROGRESS = 1
+    # lesson is finished
     FINISHED = 2
+    # lesson is on hold/suspended
     ON_HOLD = 3
 
     @property
