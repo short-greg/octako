@@ -197,13 +197,25 @@ class Chart(object):
         self._children = dict()
         self._registered = dict()
     
-    def update(self, id: str, epoch: int, iteration: int, n_iterations: int, result: dict):
-        
-        if id not in self._registered:
-            raise RuntimeError(f"Teacher {id} has not been registered.")
-        self._current = id
-        self._progress[id] = Progress(epoch, n_iterations, iteration)
-        self._result_cols[id].update(result.keys())
+    def update(self, teacher_id: str, epoch: int, iteration: int, n_iterations: int, result: dict):
+        """_summary_
+
+        Args:
+            teacher_id (str): id of the teacher
+            epoch (int): current epoch for the teacher
+            iteration (int): current iteration for the teacher
+            n_iterations (int): _description_
+            result (dict): _description_
+
+        Raises:
+            RuntimeError: _description_
+        """
+
+        if teacher_id not in self._registered:
+            raise RuntimeError(f"Teacher {teacher_id} has not been registered.")
+        self._current = teacher_id
+        self._progress[teacher_id] = Progress(epoch, n_iterations, iteration)
+        self._result_cols[teacher_id].update(result.keys())
         
         updated = {}
         for k, v in result.items():
@@ -212,7 +224,7 @@ class Chart(object):
             else:
                 updated[k] = result[k]
         data = {
-            'Teacher': self._registered[id],
+            'Teacher': self._registered[teacher_id],
             'Epoch': epoch,
             'Iteration': iteration,
             'N Iterations': n_iterations,
@@ -268,32 +280,58 @@ class DatasetIterator(ABC):
 
     @abstractmethod
     def adv(self):
+        """Advance the data iterator
+        """
         raise NotImplementedError
     
     @abstractproperty
     def cur(self):
+        """Current value
+        """
         raise NotImplementedError
     
     @abstractmethod
     def reset(self):
+        """Reset the iterator to the beginning
+        """
         raise NotImplementedError
     
     @abstractmethod
     def __len__(self) -> int:
+        """
+        Returns:
+            int: Number of items of batches
+        """
         raise NotImplementedError
 
     @abstractmethod
     def pos(self) -> int:
+        """
+        Returns:
+            int: Current position in the 
+        """
         raise NotImplementedError
     
     @abstractmethod
     def is_end(self) -> bool:
+        """
+
+        Returns:
+            bool: is the DataLoader at the end
+        """
         raise NotImplementedError
 
 
 class DataLoaderIter(DatasetIterator):
+    """Wraps a DataLoader so iteration is easier in a course
+    """
 
     def __init__(self, dataloader: data_utils.DataLoader):
+        """initializer
+
+        Args:
+            dataloader (data_utils.DataLoader): DataLoader to iterate over
+        """
         self._dataloader = dataloader
         self._cur_iter = iter(self._dataloader)
         self._finished = False
@@ -356,6 +394,8 @@ class Assistant(ABC):
 
     @property
     def name(self):
+        """Name of the assistant
+        """
         return self._name
 
     def load_state_dict(self, state_dict):
@@ -367,13 +407,26 @@ class Assistant(ABC):
         }
 
 
-class AssistantGroup(object):
+class AssistantGroup(Assistant):
+    """Composite assistant. Makes it easier to use multiple assistants
+    """
 
-    def __init__(self, assistants: typing.List[Assistant]=None):
+    def __init__(self, assistants: typing.List[Assistant]=None, name: str="Group"):
+        """initializer
+
+        Args:
+            assistants (typing.List[Assistant], optional): List of assistants. Defaults to None.
+        """
+        super().__init__(name)
 
         self._assistants = assistants or []
 
     def assist(self, status: Status):
+        """Run all assistants in the group
+
+        Args:
+            status (Status): Current status
+        """
 
         for assistant in self._assistants:
             assistant.assist(status)
@@ -394,6 +447,12 @@ class AssistantGroup(object):
 class Lesson(ABC):
 
     def __init__(self, name: str, assistants: typing.List[Assistant]=None):
+        """initializer
+
+        Args:
+            name (str): Name of the lesson
+            assistants (typing.List[Assistant], optional): Lesson assistants. Defaults to None.
+        """
         super().__init__()
         self._assistants = AssistantGroup(assistants)
         self._name = name
@@ -401,10 +460,18 @@ class Lesson(ABC):
 
     @property
     def name(self) -> str:
+        """
+        Returns:
+            str: Name of the lesson
+        """
         return self._name
 
     @property
     def status(self) -> Status:
+        """
+        Returns:
+            Status: Current status of the lesson
+        """
         return self._status
     
     @abstractmethod
@@ -415,7 +482,7 @@ class Lesson(ABC):
     def adv(self) -> Status:
         pass
         
-    def epoch(self):
+    def adv_epoch(self):
         self._status = Status.READY
 
     @abstractproperty
@@ -456,18 +523,26 @@ class Teacher(ABC):
 
     @abstractmethod
     def adv(self) -> Status:
+        """Advance the teacher by 1
+        """
         raise NotImplementedError
     
-    def epoch(self):
+    def adv_epoch(self):
+        """Update epoch for the teacher
+        """
         self._status = Status.READY
         self._iteration = 0
         self._epoch += 1
 
     def suspend(self):
+        """Suspend execution of the teacher
+        """
         pass
 
     @property
     def status(self) -> Status:
+        """Current status of the teacher
+        """
         return self._status
     
     @abstractproperty
@@ -525,8 +600,10 @@ class Trainer(Teacher):
         self._iteration += 1
         return self._status
 
-    def epoch(self):
-        super().epoch()
+    def adv_epoch(self):
+        """Advance teh epoch by 1
+        """
+        super().adv_epoch()
         self._dataloader_iter = DataLoaderIter(self._dataloader)
 
         # self._dataloader = DataLoaderIter(data_utils.DataLoader(
@@ -587,8 +664,8 @@ class Validator(Teacher):
         self._iteration += 1
         return self._status
 
-    def epoch(self):
-        super().epoch()
+    def adv_epoch(self):
+        super().adv_epoch()
         self._dataloader_iter = DataLoaderIter(self._dataloader)
 
     def score(self):
@@ -611,6 +688,8 @@ class Validator(Teacher):
 
 
 class ProgressBar(Assistant):
+    """Assistant that displays a progress bar
+    """
 
     def __init__(self, chart: Chart, n: int=100):
 
@@ -619,6 +698,8 @@ class ProgressBar(Assistant):
         self._chart = chart
     
     def start(self):
+        """Load the progress bar
+        """
         self._pbar = tqdm()
         self._pbar.refresh()
         self._pbar.reset()
@@ -629,6 +710,8 @@ class ProgressBar(Assistant):
         self._pbar.close()
     
     def update(self):
+        """
+        """
 
         if self._pbar is None:
             self.start(self._chart)
@@ -645,6 +728,8 @@ class ProgressBar(Assistant):
         self._pbar.refresh()
 
     def assist(self, status: Status):
+        """Assist execution of the progress bar
+        """
 
         if status.is_finished or status.is_on_hold:
             self.finish()
@@ -655,16 +740,30 @@ class ProgressBar(Assistant):
 
 
 class Lecture(Lesson):
+    """Module that executes a trainer and assistants
+    """
 
     def __init__(
         self, name: str, trainer: Trainer, 
         assistants: typing.List[Assistant]=None
     ):
+        """initializer
+
+        Args:
+            name (str): Name of the lecture
+            trainer (Trainer): Trainer to execute
+            assistants (typing.List[Assistant], optional): Assistants to execute. Defaults to None.
+        """
         super().__init__(name, assistants)
         self._trainer = trainer
         self._cur_iteration = 0
 
     def adv(self) -> Status:
+        """Advance the lecture by 1
+
+        Returns:
+            Status: Status after advancing
+        """
         if self._status.is_finished:
             return self._status
     
@@ -677,6 +776,11 @@ class Lecture(Lesson):
         return self._status
 
     def suspend(self) -> Status:
+        """Suspend the execution fo the lecture
+
+        Returns:
+            Status: Status after suspending
+        """
 
         self._status = Status.ON_HOLD
         self._assistants.assist(self._status)
@@ -689,9 +793,9 @@ class Lecture(Lesson):
     def n_iterations(self):
         return self._trainer.n_iterations
 
-    def epoch(self):
-        super().epoch()
-        self._trainer.epoch()
+    def adv_epoch(self):
+        super().adv_epoch()
+        self._trainer.adv_epoch()
     
     def load_state_dict(self, state_dict):
         
@@ -709,8 +813,23 @@ class Lecture(Lesson):
 
 
 class Workshop(Lesson):
+    """
+    Workshop executes a series of lessons
+    """
 
-    def __init__(self, name: str, lessons: typing.List[Lesson], assistants: typing.List[Assistant]=None, iterations: int=1):
+    def __init__(
+        self, name: str, lessons: typing.List[Lesson], 
+        assistants: typing.List[Assistant]=None, 
+        iterations: int=1
+    ):
+        """initializer
+
+        Args:
+            name (str): Name of the workshop
+            lessons (typing.List[Lesson]): Lessons to run in sequence
+            assistants (typing.List[Assistant], optional): . Defaults to None.
+            iterations (int, optional): Number of times to repeat the workshop. Defaults to 1.
+        """
         super().__init__(name, assistants)
         self._lessons = lessons
         self._iterations = iterations
@@ -729,6 +848,11 @@ class Workshop(Lesson):
         return self._iterations
 
     def adv(self) -> Status:
+        """Advance the workshop by 1
+
+        Returns:
+            Status: Status after advancing
+        """
 
         if self._status.is_finished:
             return self._status
@@ -746,7 +870,7 @@ class Workshop(Lesson):
         
         if self._cur_lesson == len(self._lessons):
             for lesson in self._lessons:
-                lesson.epoch()
+                lesson.adv_epoch()
             self._cur_lesson = 0
         
         self._status = Status.IN_PROGRESS
@@ -754,6 +878,11 @@ class Workshop(Lesson):
         return self._status
 
     def suspend(self) -> Status:
+        """Suspend the workshop
+
+        Returns:
+            Status: Status after suspending
+        """
 
         self._status = Status.ON_HOLD
         for lesson in self._lessons:
@@ -765,10 +894,10 @@ class Workshop(Lesson):
     def iteration(self) -> int:
         return self._cur_iteration
 
-    def epoch(self):
-        super().epoch()
+    def adv_epoch(self):
+        super().adv_epoch()
         for lesson in self._lessons:
-            lesson.epoch()
+            lesson.adv_epoch()
         self._cur_iteration = 0
     
     def load_state_dict(self, state_dict):
@@ -822,8 +951,17 @@ class Notifier(Assistant):
 
 
 class NotifierF(Notifier):
+    """
+    Notifier that evaluates a function
+    """
     
     def __init__(self, name: str, assistants: typing.List[Assistant], notify_f: typing.Callable):
+        """
+        Args:
+            name (str): Name of the notifier
+            assistants (typing.List[Assistant]): Assistants to notify 
+            notify_f (typing.Callable[[status], bool]): Function to evaluate. Returns a boolean
+        """
         super().__init__(name, assistants)
         self._notify_f = notify_f
     
@@ -833,6 +971,7 @@ class NotifierF(Notifier):
 
 class IterationNotifier(Notifier):
     """
+    Notify the assistant when the current progress is at a certain point
     """
     def __init__(self, name: str, assistants: typing.List[Assistant], chart: Chart, frequency: int):
 
@@ -868,6 +1007,12 @@ class Course(ABC):
 
 
 class StandardCourse(Course):
+    """
+    Typical course that consists of 
+    1. Training a single learner
+    2. Managing the chart
+    3. Performing a training pass and testing pass 
+    """
     
     def _build_workshop(self) -> Workshop:
         raise NotImplementedError
@@ -914,6 +1059,9 @@ class StandardCourse(Course):
 
 
 class ValidationCourse(StandardCourse):
+    """
+    Course for learning hyperparameters - Use before doing the test course
+    """
 
     def __init__(
         self, training_dataset: data_utils.Dataset, 
@@ -968,6 +1116,9 @@ class ValidationCourse(StandardCourse):
 
 
 class TestingCourse(StandardCourse):
+    """
+    Course for training and then testing a model
+    """
 
     def __init__(
         self, training_dataset: data_utils.Dataset, 

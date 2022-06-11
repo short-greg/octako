@@ -604,6 +604,8 @@ class Aggregator(nn.Module):
 
 
 class All(Aggregator):
+    """Retrieve all outputs
+    """
 
     def update(self, x, state=None):
     
@@ -619,6 +621,8 @@ class All(Aggregator):
 
 
 class Last(Aggregator):
+    """Retrieve the last output
+    """
 
     def update(self, x, state=None): 
         return x
@@ -700,23 +704,44 @@ class Process(ABC):
 
 
 class NodeSet(object):
+    """Set of nodes. Can use to probe
+    """
 
     def __init__(self, nodes: typing.List[Node]):
         self._nodes = {node.name: node for node in nodes}
     
     def apply(self, process: Process):
+        """Apply a process on each node in the set
+
+        Args:
+            process (Process)
+        """
         for node in self._nodes.values():
             if isinstance(process, Process):
                 process.apply(node)
             else:
                 process(node)
         
-    def __getitem__(self, key: str):
+    def __getitem__(self, key: str) -> Node:
+        """
+        Args:
+            key (str): name of the nodeset
+
+        Returns:
+            Node
+        """
         if key not in self._nodes:
             raise KeyError("There is no node named key.")
         return self._nodes[key]
 
     def probe(self, by):
+        """
+        Args:
+            by (dict): Outputs for nodes {'node': {output}}
+
+        Returns:
+            typing.Union[typing.List[torch.Tensor], torch.Tensor]
+        """
         result = []
         for node in self._nodes:
             result.append(node.probe(by))
@@ -740,7 +765,9 @@ class Tako(nn.Module):
 
     def sub(self, y: typing.Union[str, typing.List[str]], x: typing.Union[str, typing.List[str]]):
         """
-        Extract a sub network 
+        Extract a sub network
+
+        TODO: Simplify the code 
         """
 
         x_is_list = isinstance(x, list)
@@ -780,7 +807,7 @@ class Tako(nn.Module):
         return out      
 
     def probe(self, y: typing.Union[str, typing.List[str]], in_: Node=None, by: typing.Dict[str, typing.Any]=None):
-
+        
         by = by or {}
         if isinstance(y, list):
             out = {y_i: UNDEFINED for y_i in y}
