@@ -710,14 +710,14 @@ class ProgressBar(Assistant):
         self._n = n
         self._chart = chart
         self._cur = None
+        self._to_reset = False
     
     def start(self):
         """Load the progress bar
         """
-        self._pbar = tqdm()
-        self._pbar.reset()
-        self._pbar.refresh()
+        # self._pbar.refresh()
         self._cur = self._chart.cur
+        # self._to_reset = False
         # self._pbar.total = self._chart.progress().n_iterations
 
     def finish(self):
@@ -727,15 +727,15 @@ class ProgressBar(Assistant):
     def update(self):
         """
         """
-        if self._pbar is None or self._cur is None:
-            self.start()
-        elif self._cur != self._chart.cur:
-            self.restart()
+        if self._pbar is None:
+            self._pbar = tqdm(total=self._chart.progress().n_iterations)
+        elif self._to_reset:
+            self._pbar.reset(total=self._chart.progress().n_iterations)
+            self._to_reset = False
         
         self._cur_iteration = self._chart.progress().iterations
 
         self._pbar.refresh()
-        self._pbar.total = self._chart.progress().n_iterations
         self._pbar.update(1)
         results = self._chart.results()
         n = min(self._n, len(results))
@@ -746,8 +746,7 @@ class ProgressBar(Assistant):
         })
 
     def restart(self):
-        self.finish()
-        self.start()
+        self._to_reset = True
 
     def assist(self, status: Status):
         """Assist execution of the progress bar
