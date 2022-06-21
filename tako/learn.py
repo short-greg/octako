@@ -397,6 +397,9 @@ class Assistant(ABC):
     @abstractmethod
     def assist(self, status: Status):
         pass
+    
+    def restart(self):
+        pass
 
     @property
     def name(self):
@@ -436,6 +439,10 @@ class AssistantGroup(Assistant):
 
         for assistant in self._assistants:
             assistant.assist(status)
+
+    def restart(self):
+        for assistant in self._assistants:
+            assistant.restart()
 
     def load_state_dict(self, state_dict):
         
@@ -595,7 +602,7 @@ class Trainer(Teacher):
         result = self._learner.learn(x, t)
         
         self._chart.update(
-            id=self._id,
+            teacher_id=self._id,
             epoch=self._epoch,
             iteration=self._iteration,
             n_iterations=self.n_iterations,
@@ -659,7 +666,7 @@ class Validator(Teacher):
         x, t = self._dataloader_iter.cur
         result = self._learner.test(x, t)
         self._chart.update(
-            id=self._id,
+            teacher_id=self._id,
             epoch=self._epoch,
             iteration=self._iteration,
             n_iterations=self.n_iterations,
@@ -702,36 +709,45 @@ class ProgressBar(Assistant):
         self._pbar: tqdm = None
         self._n = n
         self._chart = chart
+        self._cur = None
     
     def start(self):
         """Load the progress bar
         """
         self._pbar = tqdm()
-        self._pbar.refresh()
         self._pbar.reset()
-        if self._chart.progress() is not None:
-            self._pbar.total = self._chart.progress().n_iterations
+        self._pbar.refresh()
+        self._cur = self._chart.cur
+        # self._pbar.total = self._chart.progress().n_iterations
 
     def finish(self):
         self._pbar.close()
+        self._pbar = None
     
     def update(self):
         """
         """
+        if self._pbar is None or self._cur is None:
+            self.start()
+        elif self._cur != self._chart.cur:
+            self.restart()
+        
+        self._cur_iteration = self._chart.progress().iterations
 
-        if self._pbar is None:
-            self.start(self._chart)
-
+        self._pbar.refresh()
+        self._pbar.total = self._chart.progress().n_iterations
         self._pbar.update(1)
         results = self._chart.results()
         n = min(self._n, len(results))
-        self._pbar.set_description_str(self._chart.cur)
+        # self._pbar.set_description_str(self._chart.cur)
         self._pbar.set_postfix({
             **asdict(self._chart.progress()),
             **results.tail(n).mean(axis=0).to_dict(),
         })
-        self._pbar.total = self._chart.progress().n_iterations
-        self._pbar.refresh()
+
+    def restart(self):
+        self.finish()
+        self.start()
 
     def assist(self, status: Status):
         """Assist execution of the progress bar
@@ -802,6 +818,7 @@ class Lecture(Lesson):
     def adv_epoch(self):
         super().adv_epoch()
         self._trainer.adv_epoch()
+        self._assistants.restart()
     
     def load_state_dict(self, state_dict):
         
@@ -877,6 +894,7 @@ class Workshop(Lesson):
         if self._cur_lesson == len(self._lessons):
             for lesson in self._lessons:
                 lesson.adv_epoch()
+            self._assistants.restart()
             self._cur_lesson = 0
         
         self._status = Status.IN_PROGRESS
@@ -904,6 +922,7 @@ class Workshop(Lesson):
         super().adv_epoch()
         for lesson in self._lessons:
             lesson.adv_epoch()
+        self._assistants.restart()
         self._cur_iteration = 0
     
     def load_state_dict(self, state_dict):
@@ -951,9 +970,9 @@ class Notifier(Assistant):
         if self.to_notify(status):
             self._assistants.assist(status)
     
-    def reset(self):
-        super().reset()
-        self._assistants.reset()
+    def restart(self):
+        super().restart()
+        self._assistants.restart()
 
 
 class NotifierF(Notifier):
