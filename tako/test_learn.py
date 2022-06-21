@@ -126,14 +126,14 @@ class TestTrainer:
 
         trainer = Trainer("Training",  Chart(), Learner(), get_dataset(), N_ELEMENTS // 2, True)
         trainer.adv()
-        trainer.epoch()
+        trainer.adv_epoch()
         assert trainer.status.is_ready
 
     def test_reset_resets_the_start_of_the_iterator(self):
 
         trainer = Trainer("Training", Chart(), Learner(), get_dataset(), N_ELEMENTS // 2, True)
         trainer.adv()
-        trainer.epoch()
+        trainer.adv_epoch()
         trainer.adv()
         trainer.adv()
         assert trainer.status.is_in_progress
@@ -166,14 +166,14 @@ class TestValidator:
 
         validator = Validator("validation", Chart(), Learner(), get_dataset(), N_ELEMENTS // 2)
         validator.adv()
-        validator.epoch()
+        validator.adv_epoch()
         assert validator.status.is_ready
 
     def test_reset_resets_the_start_of_the_iterator(self):
 
         validator = Validator("validation", Chart(), Learner(), get_dataset(), N_ELEMENTS // 2)
         validator.adv()
-        validator.epoch()
+        validator.adv_epoch()
         validator.adv()
         validator.adv()
         assert validator.status.is_in_progress
@@ -213,7 +213,7 @@ class TestLecturer:
         validator = Validator("validation", Chart(), Learner(), get_dataset(), N_ELEMENTS // 2)
         lecture = Lecture("Validation" , validator, [dummy1])
         lecture.adv()
-        lecture.epoch()
+        lecture.adv_epoch()
         lecture.adv()
         lecture.adv()
         assert lecture.status.is_in_progress
@@ -268,7 +268,7 @@ class TestWorkshop:
         lecture = Lecture("Validation" , validator, [dummy1])
         workshop = Workshop("Training", [lecture], iterations=1)
         workshop.adv()
-        workshop.epoch()
+        workshop.adv_epoch()
         workshop.adv()
         workshop.adv()
         assert workshop.status.is_in_progress
