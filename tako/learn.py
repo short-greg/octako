@@ -10,6 +10,7 @@ from sklearn import preprocessing
 from torch.utils import data as data_utils
 from tqdm import tqdm
 from enum import Enum
+from os.path import exists as file_exists
 # from .learning import Learner
 import uuid
 """
@@ -277,6 +278,13 @@ class Chart(object):
         self._result_cols: typing.Dict[str, set] = state_dict['result_cols']
         self._current = state_dict['current']
         self._children = state_dict['children']
+    
+    def log(self, file_path: str, append: bool=True):
+        if file_exists(file_path) and append:
+            df = pd.concat([pd.read_csv(file_path), self.df], ignore_index=True)
+        else: df = self.df
+        
+        df.to_csv(file_path)
 
 
 
@@ -729,9 +737,11 @@ class ProgressBar(Assistant):
         """
         if self._pbar is None:
             self._pbar = tqdm(total=self._chart.progress().n_iterations)
-        elif self._to_reset:
+            self._cur = self._chart.cur
+        elif self._to_reset or self._cur != self._chart.cur:
             self._pbar.reset(total=self._chart.progress().n_iterations)
             self._to_reset = False
+            self._cur = self._chart.cur
         
         self._cur_iteration = self._chart.progress().iterations
 
@@ -1063,7 +1073,11 @@ class StandardCourse(Course):
         return self._workshop.status
     
     @abstractproperty
-    def chart(self):
+    def chart(self) -> Chart:
+        pass
+
+    @abstractmethod
+    def log(self, filepath: str, append: bool=True):
         pass
     
     def __iter__(self) -> typing.Iterator:
@@ -1124,7 +1138,7 @@ class ValidationCourse(StandardCourse):
         }
 
     @property
-    def chart(self):
+    def chart(self) -> Chart:
         return self._chart
     
     @property
@@ -1137,6 +1151,9 @@ class ValidationCourse(StandardCourse):
 
     def score(self):
         return self._validator.score()
+    
+    def log(self, filepath: str, append: bool=True):
+        self._chart.log(filepath, append)
 
 
 class TestingCourse(StandardCourse):
@@ -1185,7 +1202,7 @@ class TestingCourse(StandardCourse):
         }
 
     @property
-    def chart(self):
+    def chart(self) -> Chart:
         return self._chart
 
     @property
@@ -1198,3 +1215,6 @@ class TestingCourse(StandardCourse):
 
     def score(self):
         return self._tester.score()
+
+    def log(self, filepath: str, append: bool=True):
+        self._chart.log(filepath, append)
